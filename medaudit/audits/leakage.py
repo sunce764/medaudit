@@ -135,7 +135,11 @@ def format_report(rep):
     if rep.get("group_assessed", True):
         lines.append(f"  group leakage   {rep['n_group_leak']} group(s)")
     else:
-        lines.append("  group leakage   NOT ASSESSED (no group ids supplied to this check)")
+        # group_note lets a caller state the REAL reason. The default is only
+        # true when no ids reached this function; an orchestrator that withheld
+        # them must say so itself rather than let this stand as the explanation.
+        lines.append("  group leakage   NOT ASSESSED — " +
+                     rep.get("group_note", "no group ids supplied to this check"))
     for g, s in list(rep["group_leak"].items())[:5]:
         lines.append(f"    group {g!r:>12} in splits {s}")
     total = rep["n_near_dup"]
