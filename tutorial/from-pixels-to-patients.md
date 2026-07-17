@@ -383,7 +383,7 @@ a silently-narrow CI being worse than an honestly wide one.
 ## 6. The honest part: findings that died ★
 
 The most valuable output of the real audit was not a green check. It was a series
-of headlines we **retracted ourselves.** Four, each with a transferable lesson.
+of headlines we **retracted ourselves.** Five, each with a transferable lesson.
 
 **1. We compared apples to oranges.** Our first alarming result: malignant
 sensitivity fell from **0.586 internally to 0.378 externally**. Except the
@@ -432,7 +432,7 @@ literature.*** It is why §2 reports only the mitigation I ran properly, and dra
 no conclusion about de-biasing in general.
 
 **Why put this in a tutorial?** Because *self-skepticism is the method, not a
-disclaimer at the end.* Every one of those four was killed by a discipline that is
+disclaimer at the end.* Every one of those five was killed by a discipline that is
 cheap to apply and boring to describe: **compare like with like; pick a metric
 that can see your claim; get an honest CI; match the instrument to the domain.**
 That list is the payload of this whole piece — the same discipline that catches
