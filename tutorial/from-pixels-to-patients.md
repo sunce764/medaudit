@@ -94,7 +94,7 @@ to reproduce — in miniature — what a real audit turned up.
 
 ## 2. Audit I — the shortcut probe ★
 
-> ★ marks the two sections to read if you only read two.
+> ★ marks the sections to read if you read nothing else.
 
 **The war story.** Before any model saw a pixel, the dataset already had a
 problem. Suspicious lesions had, in routine practice, been imaged more often
@@ -104,10 +104,9 @@ lesion status were entangled at an **odds ratio of 33.5×** (Cramér's V = 0.462
 χ² ≈ 1725). The shortcut was sitting in the data, waiting to be learned.
 
 A model can get a high AUROC by learning "blue light → malignant." That is a
-**shortcut** [1]: a feature that is predictive in your data but is not the
-disease, and that breaks the moment the correlation does — a new hospital that
-blue-lights everything, or a screening cohort where mode is chosen by protocol,
-not suspicion. This is not an exotic failure. Models that appeared to detect
+**shortcut** [1]: predictive in your data, but not the disease, and it breaks the
+moment the correlation does — a new hospital that blue-lights everything, or a
+screening cohort where mode follows protocol, not suspicion. This is not an exotic failure. Models that appeared to detect
 COVID-19 from chest radiographs were substantially reading laterality markers and
 source-specific artefacts rather than lung pathology [2]; and aggregate metrics
 routinely hide subgroups where the model fails outright [3].
@@ -128,16 +127,16 @@ print(probe.format_report(rep))
 On the real data the probe read imaging mode out of the frozen features at
 **AUROC 0.994** (95% CI 0.986–0.999).
 
-**Now be unimpressed.** White light and blue light differ by a global colour
-transform: the two populations are *visibly* different to the human eye, before
-any question of pathology. Essentially *any* embedding will decode that at ~0.99
-— including a model that is scrupulously ignoring mode when it decides. A high
-probe here was never a discovery; it was a near-certainty.
+**Now be unimpressed.** White and blue light differ by a global colour transform:
+the two populations are *visibly* different before any question of pathology.
+Essentially *any* embedding decodes that at ~0.99 — including a model scrupulously
+ignoring mode when it decides. A high probe here was never a discovery; it was a
+near-certainty.
 
 That defines what a probe is *for*. It answers **"is this attribute available to
 the model?"** — cheaply, on frozen features, in seconds. It does not answer **"is
 the model using it?"** For a visually dominant attribute the first answer is
-almost always yes, and all the interesting work lives in the second question. So
+almost always yes, and all the interesting work lives in the second. So
 `medaudit`'s verdict is hedged on purpose:
 
 > *…the attribute is available to the model as a potential shortcut; **IF** the
@@ -145,8 +144,8 @@ almost always yes, and all the interesting work lives in the second question. So
 > Note this shows the attribute is* encoded, *not that it is* used.
 
 The probe earns its keep on attributes you would **not** have guessed were
-visible — scanner model, site, acquisition date, a stain batch. There, "available
-at all?" is genuinely news.
+visible — scanner, site, acquisition date, stain batch. There, "available at
+all?" is news.
 
 **And detecting a shortcut is far easier than removing one.** We tried:
 adversarial de-biasing (a gradient-reversal head, GRL) moved the probe only from
@@ -167,24 +166,22 @@ still decode mode? Holding the diagnosis constant removes the class-collinearity
 explanation.
 
 **Be precise about what that buys**, because it is less than it looks. The
-within-class probe removes the ***label*-collinearity** explanation. It does not
-remove a ***severity*-collinearity** one. The endoscopist chose blue light by
-*looking* — so within the malignant class, the blue-lit lesions are plausibly the
-ones that looked worse. A positive within-class probe is then consistent with two
-stories: the features encode the light source, or they encode *how advanced the
-lesion is*, which predicts the light source. Conditioning on a coarse label holds
-the paperwork constant, not the biology. Separating those needs something the
-probe cannot give you — a severity covariate to condition on too, or an attribute
-assigned independently of appearance. Say which one you have.
+within-class probe removes the ***label*-collinearity** explanation, not a
+***severity*-collinearity** one. The endoscopist chose blue light by *looking*, so
+within the malignant class the blue-lit lesions are plausibly the ones that looked
+worse. A positive within-class probe is then consistent with two stories: the
+features encode the light source, or they encode *how advanced the lesion is*,
+which predicts it. Conditioning on a coarse label holds the paperwork constant,
+not the biology. Separating those needs a severity covariate to condition on too,
+or an attribute assigned independently of appearance. Say which you have.
 
-Still, the distinction is the whole game, and it is worth watching it work where
-we know the answer. `tutorial/make_demo.py` builds two cohorts differing in
-**exactly one variable**: whether the features encode mode at all (`beta`). The
-85/15 mode-class correlation, the class signal, the noise, the patient structure,
-the sample size — identical. (A tutorial that tells you to control your variables
-has to control its own. An earlier draft changed the correlation *and* the
-encoding at once, which made the comparison worthless; that draft is why this
-parenthesis exists.)
+Still, the distinction is the whole game, and worth watching where we know the
+answer. `make_demo.py` builds two cohorts differing in **exactly one variable**:
+whether the features encode mode at all (`beta`). The 85/15 correlation, class
+signal, noise, patient structure and sample size are identical. (A tutorial that
+tells you to control your variables has to control its own. An earlier draft
+changed the correlation *and* the encoding at once, making the comparison
+worthless; that draft is why this parenthesis exists.)
 
 **Case A — the features encode only the class.** Mode is never written into them:
 
@@ -254,15 +251,14 @@ verified by eye that a hash-distance-zero pair was two genuinely different frame
 The right instrument is **cosine similarity in a learned embedding space**: it
 keeps true near-duplicates separable from merely same-domain images.
 
-**But not just any embedding — here §2 comes back to bite.** The obvious move is
-to reuse the model's own features. Don't, not naively: §2 established that they
-decode mode at 0.994, so a **giant mode axis** runs through that space. Cosine
-similarity in it is dominated by "were these shot under the same light?", and
-your detector will rank two unrelated blue-light frames above a genuine duplicate
-pair — rebuilding the dHash failure with better tooling. Use an embedding
-independent of the attribute you are worried about (a generic ImageNet backbone
-is usually fine), or residualise that direction out first. Having just proved a
-space is dominated by an axis, you cannot use distances in it as if it weren't.
+**But not just any embedding — here §2 bites back.** The obvious move is to reuse
+the model's own features. Don't: §2 showed they decode mode at 0.994, so a
+**giant mode axis** runs through that space. Cosine similarity in it is dominated
+by "shot under the same light?", and your detector will rank two unrelated
+blue-light frames above a genuine duplicate pair — rebuilding the dHash failure
+with better tooling. Use an embedding independent of the attribute you are
+worried about (a generic ImageNet backbone is usually fine), or residualise that
+direction out first.
 
 ```python
 from medaudit.audits import leakage
@@ -282,25 +278,22 @@ matches your domain's homogeneity, and always eyeball what it flags.*
 
 ## 4. Audit III — calibration ★
 
-**This is the section that mattered most in the real audit, and it is the one you
-are most likely to skip.**
+**This mattered most in the real audit, and it is the section you are most likely
+to skip.**
 
 Go back to §0. Internal white-light malignant AUROC **0.796**; external **0.808**.
-Discrimination transferred — that part was genuinely good news. And yet, applying
-the *same* decision rule (P > 0.5) on both, sensitivity fell from **0.570** to
-**0.378**. Same ranking ability. Same threshold. A third of the sensitivity, gone.
+Discrimination transferred — genuinely good news. And yet under the *same* rule
+(P > 0.5), sensitivity fell from **0.570** to **0.378**. Same ranking ability,
+same threshold, a third of the sensitivity gone.
 
 Nothing about the model's ability to *order* patients broke. What broke was the
-mapping from its scores to probabilities — so a threshold calibrated in one
-hospital sat in the wrong place in the other. **The ROC curves are nearly
-superimposed while the reliability curves come apart.** If you only ever plot the
-ROC, this failure is invisible: it lives entirely in the axis AUROC discards.
-
-AUROC only cares about the *ranking* of scores [9]. It is completely blind to
-whether a "0.9" means 90%. A model can rank perfectly and still be systematically
-over-confident — and modern networks generally *are* [4] — which, at the bedside,
-is the difference between a probability a clinician can act on and a number that
-merely sorts.
+mapping from scores to probabilities, so a threshold calibrated in one hospital
+sat in the wrong place in the other. **The ROC curves nearly superimpose while the
+reliability curves come apart.** Plot only the ROC and this failure is invisible —
+it lives entirely in the axis AUROC discards [9]. A model can rank perfectly and
+still be systematically over-confident, as modern networks generally are [4]:
+at the bedside, that is the difference between a probability a clinician can act
+on and a number that merely sorts.
 
 `medaudit` uses hand-written, unit-tested calibration metrics (no `sklearn`, so
 every number is auditable against its definition):
@@ -325,18 +318,14 @@ Two habits worth teaching:
   training on the test set.
 - **Count your clusters, not your images.** This is where the real audit ran out
   of road. Its blue-light malignant subset was 51 images — but only ~20 patients,
-  which at 15 bins is about 3 samples per bin. We reported a per-mode ECE ranking
-  off that, then withdrew it: at that size the number is noise wearing a decimal
-  point. **Below roughly 30–40 clusters, stop.** Report Brier with a cluster
-  bootstrap, say the subgroup is underpowered, and resist the ranking. `medaudit`
-  now prints the group count next to every interval, and warns when it is small,
-  precisely because "n=51" reads as reassuring and "20 patients" does not.
-
-And one caution the toolkit cannot fix for you: the percentile cluster bootstrap
-it ships is itself **anti-conservative at small cluster counts** — the interval it
-draws around 20 patients is narrower than the truth. An honest CI is not the same
-as a correct one. When the group count is low, the right output is "inconclusive",
-not a tighter-looking bar.
+  about 3 per bin at 15 bins. We reported a per-mode ECE ranking off that, then
+  withdrew it: at that size the number is noise wearing a decimal point.
+  **Below roughly 30–40 clusters, stop** — report Brier with a cluster bootstrap,
+  say the subgroup is underpowered, resist the ranking. `medaudit` prints the
+  group count beside every interval and warns when it is small, because "n=51"
+  reads as reassuring and "20 patients" does not. And note what the toolkit
+  cannot fix: its percentile cluster bootstrap is itself **anti-conservative** at
+  such counts — narrower than the truth. An honest CI is not a correct one.
 
 ---
 
@@ -475,14 +464,11 @@ To audit your own model, extract penultimate-layer activations to an `(N, D)`
 by design — it is the only step needing your framework and GPU, and leaving it out
 is what lets the audit run anywhere.
 
-**What an audit does and does not give you.** It narrows failure modes; it does
-not certify. A linear probe that clears the margin shows an attribute is *encoded*
-— not that the head uses it, and not that a non-linear shortcut is absent when the
-probe is quiet. Embedding duplicate-detection misses what the embedding cannot
-see. Calibration on a held-out split says nothing about a new hospital. The job is
-to move you from "AUROC 0.80, discrimination transfers, ship it" to a defensible,
-itemised account of *what you checked, what you found, and what you still don't
-know* — which is exactly the account a clinical reviewer, and a patient, deserve.
+**An audit narrows failure modes; it does not certify.** Every check here has a
+blind spot, named where it appears. The job is to move you from "AUROC 0.80,
+discrimination transfers, ship it" to an itemised account of *what you checked,
+what you found, and what you still don't know* — the account a clinical reviewer,
+and a patient, deserve.
 
 From pixels to patients, the last mile is not a higher number. It is the audit
 that tells you whether the number means what you hoped.
@@ -514,6 +500,30 @@ miniature. The war stories quote aggregate results from an audit of a classifier
 trained on a 2025 public cystoscopy dataset — no images, no rows, no raw data.
 (The repository's `.gitignore` refuses images, arrays and weights by default. If
 you fork this to audit your own model, keep it that way: the code is what ships.)
+
+---
+
+## AI assistance
+
+This work was carried out with AI assistance throughout, and it would be
+misleading to describe it any other way. Specifically: the underlying research —
+the cystoscopy reliability audit whose results and retractions this tutorial
+draws on — was directed by me and assisted by an AI coding assistant (Claude) at
+every stage, from experiment code to analysis to adversarial review of my own
+conclusions. This tutorial's prose was drafted by that assistant. The
+accompanying `medaudit` toolkit — implementation, tests, demo — was largely
+written by it, generalising my research code. It also ran the citation checks and
+a multi-agent adversarial review of this draft, which removed several errors of
+mine and several of its own — including a claim in §2 that my own records had
+already marked unclaimable, and which I had let through.
+
+What is mine: the choice of problem, the direction of the work, the decisions
+about what could and could not be claimed, and — the part I would defend hardest
+— the decision to retract the four findings in §6 rather than publish the
+flattering versions of them. I take responsibility for everything asserted here.
+
+I disclose this in full knowing the challenge encourages unassisted submissions.
+A tutorial about not overclaiming should not open with one.
 
 ---
 
