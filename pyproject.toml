@@ -9,8 +9,13 @@ description = "A reliability audit toolkit for medical-image classifiers: acquis
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
+authors = [{ name = "Chao Sheng" }]
 keywords = ["medical-imaging", "trustworthy-ml", "shortcut-learning", "calibration", "model-audit"]
 dependencies = ["numpy>=1.21"]
+
+[project.urls]
+Repository = "https://github.com/sunce764/medaudit"
+Tutorial = "https://github.com/sunce764/medaudit/blob/main/tutorial/from-pixels-to-patients.md"
 
 [project.optional-dependencies]
 # Not needed by any audit: the toolkit is numpy-only and consumes features you extract
