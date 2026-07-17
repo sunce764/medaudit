@@ -101,6 +101,11 @@ command, the last two composed from the same toolkit's primitives. Output blocks
 come from the synthetic demo; war-story numbers come from the real audit and are
 labelled as such.
 
+![The four audits at a glance](assets/roadmap.png)
+
+*The four audits at a glance — and, for each, the claim it does not license. The
+last column is what runs automatically versus what you assemble yourself.*
+
 ---
 
 ## 2. Audit I — the shortcut probe ★
