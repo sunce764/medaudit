@@ -25,8 +25,10 @@ small, hand-written, and non-overclaiming: every verdict also states what it doe
 - **Leakage audit** — cross-split near-duplicates by embedding cosine similarity,
   plus an exact group-leakage check when you supply a split of record.
 
-Both report group-cluster bootstrap confidence intervals (resampling whole
-patients, not rows) and a plain-language verdict.
+The probe reports group-cluster bootstrap confidence intervals (resampling whole
+patients, not rows); the leakage audit reports counts and the worst offending
+pairs, not an interval. Both end in a plain-language verdict that also states what
+it does *not* establish.
 
 **Calibration and prevalence are not yet wired into the report.** Their metric
 primitives are implemented and tested (`medaudit.metrics`: ECE, Brier, reliability
