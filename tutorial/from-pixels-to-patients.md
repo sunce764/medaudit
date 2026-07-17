@@ -13,16 +13,15 @@ the `medaudit` toolkit (open-source, MIT).
 > metric primitives (§4, §5) — and, more to the point, read all four the way a
 > reviewer would.
 >
-> **On the data.** Every code block runs on a synthetic cohort — deliberately.
-> The dataset behind the war stories cannot be redistributed, and a tutorial you
-> can only run with restricted access is a tutorial nobody runs. Synthetic data
-> also buys what real data cannot: **we know the ground truth**, so §2 can show
-> the audit getting it right *and* getting it convincingly wrong. The war stories
-> supply the rest — what happened to a real classifier trained on a 2025 public
-> cystoscopy dataset. Those figures are **single-seed**: they show you what the
-> audit does and how to read it, not settled claims about that dataset. Saying so
-> is not throat-clearing; it is the first instance of the discipline this whole
-> piece is about, and §6 is what happened when we forgot it.
+> **On the data.** Code blocks run on a synthetic cohort — deliberately. The
+> dataset behind the war stories cannot be redistributed, and a tutorial you can
+> only run with restricted access is a tutorial nobody runs. Synthetic data also
+> buys what real data cannot: **we know the ground truth**, so §2 can show the
+> audit getting it right *and* getting it convincingly wrong. The war stories are
+> **single-seed** figures from a real classifier trained on a 2025 public
+> cystoscopy dataset — what the audit does and how to read it, not settled claims.
+> Saying so is the first instance of the discipline this piece is about; §6 is
+> what happened when we forgot it.
 
 ---
 
@@ -75,6 +74,10 @@ img_0002.png,benign,patient_07,white_light
 - `attr_*` — any acquisition/metadata attribute you can record: imaging mode,
   scanner, site, stain. **The audit's raw material** — what a model might latch
   onto instead of the biology.
+- `split` (optional) — your own train/val/test assignment. Supply it and the
+  leakage audit checks *your* split; omit it and `medaudit` builds a group-clean
+  one itself, in which case there is no leakage to find and it says so rather
+  than claiming a clean bill.
 
 You also give it **features**: your model's penultimate-layer activations (or any
 embedding) as an `(N, D)` array, row-aligned to the manifest. Auditing frozen
@@ -106,10 +109,10 @@ lesion status were entangled at an **odds ratio of 33.5×** (Cramér's V = 0.462
 A model can get a high AUROC by learning "blue light → malignant." That is a
 **shortcut** [1]: predictive in your data, but not the disease, and it breaks the
 moment the correlation does — a new hospital that blue-lights everything, or a
-screening cohort where mode follows protocol, not suspicion. This is not an exotic failure. Models that appeared to detect
-COVID-19 from chest radiographs were substantially reading laterality markers and
-source-specific artefacts rather than lung pathology [2]; and aggregate metrics
-routinely hide subgroups where the model fails outright [3].
+screening cohort where mode follows protocol, not suspicion. Not an exotic failure: models that appeared to detect COVID-19 from chest
+radiographs were substantially reading laterality markers and source artefacts,
+not lung pathology [2]; and aggregate metrics routinely hide subgroups where a
+model fails outright [3].
 
 **How to detect it: the linear probe.** Freeze the features. Train a simple
 linear classifier to predict the *attribute* (imaging mode) from those features,
@@ -158,7 +161,7 @@ regularisation; last-layer retraining [8] needs them only for a small reweightin
 set — cheaper to try first.)
 
 **The trap in the probe — and how to escape it.** A high overall probe score is
-*ambiguous*. If mode is correlated with the diagnosis (it was, at OR 33×), a probe
+*ambiguous*. If mode is correlated with the diagnosis (it was, at OR 33.5×), a probe
 can score high just by reading the *class* and exploiting the correlation — that
 is not the same as the features genuinely encoding mode. So `medaudit` runs a
 second probe **within each fixed class**: among malignant-only images, can you
@@ -175,13 +178,11 @@ which predicts it. Conditioning on a coarse label holds the paperwork constant,
 not the biology. Separating those needs a severity covariate to condition on too,
 or an attribute assigned independently of appearance. Say which you have.
 
-Still, the distinction is the whole game, and worth watching where we know the
-answer. `make_demo.py` builds two cohorts differing in **exactly one variable**:
-whether the features encode mode at all (`beta`). The 85/15 correlation, class
-signal, noise, patient structure and sample size are identical. (A tutorial that
-tells you to control your variables has to control its own. An earlier draft
-changed the correlation *and* the encoding at once, making the comparison
-worthless; that draft is why this parenthesis exists.)
+Still, the distinction is the whole game. `make_demo.py` builds two cohorts
+differing in **exactly one variable** — whether the features encode mode at all
+(`beta`). The 85/15 correlation, class signal, noise, patient structure and sample
+size are identical; a tutorial telling you to control your variables has to
+control its own.
 
 **Case A — the features encode only the class.** Mode is never written into them:
 
@@ -209,7 +210,8 @@ shortcut probe · attribute = 'mode'  (positive if CI lower bound > 0.60; point 
 Look at the headlines: **0.84 and 0.91**. Both high. Both, on their own, look
 like a model that has learned the light source. One of them is a model that never
 saw mode at all. **The headline cannot tell them apart — the within-class row can.**
-In case A it drops to chance; in case B it stays up.
+In case A the within-class rows fall to 0.55–0.57 — near chance, and far below
+the 0.60 decision line; in case B they stay up near 0.77.
 
 Two details there do quiet work. **"300 groups, 900 rows"**: the group count is
 the sample size that matters — three images of one patient are not three
@@ -237,7 +239,8 @@ Two kinds of leakage, both silent:
    from ids; `medaudit` checks it exactly and returns a GROUP LEAKAGE verdict
    telling you to fix the split before trusting any metric. It reports; it does
    not gate — and it can only run this check on a split you actually give it
-   (see §1). Ask for it explicitly, or it silently reports NOT ASSESSED.
+   (the optional `split` column in §1). Supply it, or the report says NOT
+   ASSESSED — which it does out loud, not silently.
 2. **Near-duplicate leakage** — visually near-identical images with *no shared
    id*. There is no key to join on; you must compare the images themselves.
 
@@ -307,7 +310,7 @@ for conf, acc, n in metrics.reliability_curve(probs, labels):
     ...   # plot acc vs conf; the diagonal is perfect calibration
 ```
 
-Two habits worth teaching:
+Three habits worth teaching:
 
 - **Report Brier alongside ECE.** ECE is a biased estimator of calibration error
   and its value depends on how you bin [11, 12]; equal-mass (quantile) bins are
@@ -317,8 +320,8 @@ Two habits worth teaching:
   the same split you report calibration for is the calibration version of
   training on the test set.
 - **Count your clusters, not your images.** This is where the real audit ran out
-  of road. Its blue-light malignant subset was 51 images — but only ~20 patients,
-  about 3 per bin at 15 bins. We reported a per-mode ECE ranking off that, then
+  of road. Its blue-light subset was 51 images — but only ~20 patients,
+  about 3 images per bin at 15 bins — or 1.3 patients. We reported a per-mode ECE ranking off that, then
   withdrew it: at that size the number is noise wearing a decimal point.
   **Below roughly 30–40 clusters, stop** — report Brier with a cluster bootstrap,
   say the subgroup is underpowered, resist the ranking. `medaudit` prints the
@@ -397,7 +400,7 @@ of headlines we **retracted ourselves.** Four, each with a transferable lesson.
 sensitivity fell from **0.586 internally to 0.378 externally**. Except the
 internal number was computed by `argmax` over five classes and the external one
 by thresholding *P > 0.5* — two different decision rules. Measured like for like
-(0.570 → 0.378), the unit error accounted for about **8%** of the gap, not half —
+(0.570 → 0.378), the unit error accounted for about **8%** of the gap —
 but until we fixed it we could not know that, and it is the first thing an honest
 reader would have asked. *Lesson: before you explain a gap, check that both sides were
 measured the same way.*
@@ -430,11 +433,10 @@ Retracting one claim does not entitle you to assert its replacement.)
 disclaimer at the end.* Every one of those four was killed by a discipline that is
 cheap to apply and boring to describe: **compare like with like; pick a metric
 that can see your claim; get an honest CI; match the instrument to the domain.**
-That list is the payload of this whole piece. It is the same discipline that would
-have caught someone else's over-claim in review — which is why practising it on
-your own results is not self-flagellation, it is training. An audit you cannot
-fail is not an audit. Reporting the retraction is the most honest thing this
-project did, and it is the transferable skill.
+That list is the payload of this whole piece — the same discipline that catches
+someone else's over-claim in review. An audit you cannot fail is not an audit.
+Reporting the retraction is the most honest thing this project did, and it is the
+transferable skill.
 
 ---
 
@@ -457,8 +459,7 @@ nothing to put one around. Both end in a verdict that states what it does *not*
 establish. Calibration (§4) and prevalence (§5) are *not* wired in; you compose
 them from `medaudit.metrics`, which is why those sections show library calls
 rather than report output. Four audits is the *checklist*; two are automated so
-far. Claiming otherwise would be the exact overclaim this piece is about, and you
-should meet that sentence here rather than at the command line.
+far. Claiming otherwise would be the exact overclaim this piece is about.
 
 To audit your own model, extract penultimate-layer activations to an `(N, D)`
 `features.npy` aligned with your manifest rows. Feature extraction is out of scope
@@ -478,11 +479,14 @@ that tells you whether the number means what you hoped.
 
 ## Code & reproducibility
 
-All code: the `medaudit` repository (MIT). Each metric primitive in
-`medaudit.metrics` is checked against an independent brute-force reference written
-from its definition (`tests/test_metrics.py`) — including the quantile-binned ECE
-this tutorial recommends. The suite as a whole is 29 tests across metrics, splits,
-manifest, probe, leakage and the orchestrator.
+All code: the `medaudit` repository (MIT). The *scoring* primitives — AUROC,
+Brier, and ECE under both binning strategies, including the quantile-binned ECE
+this tutorial recommends — are each checked against an independent brute-force
+reference written from the definition (`tests/test_metrics.py`). The other two,
+`reliability_curve` and `cluster_bootstrap`, are checked only for structural and
+reproducibility properties, not against a definitional reference: worth knowing
+before you lean on them. The suite is 29 tests across metrics, splits, manifest,
+probe, leakage and the orchestrator.
 
 **Reproducing the numbers.** §2's probe blocks and the full audit report
 regenerate exactly:
@@ -506,25 +510,19 @@ you fork this to audit your own model, keep it that way: the code is what ships.
 
 ## AI assistance
 
-This work was carried out with AI assistance throughout, and it would be
-misleading to describe it any other way. Specifically: the underlying research —
-the cystoscopy reliability audit whose results and retractions this tutorial
-draws on — was directed by me and assisted by an AI coding assistant (Claude) at
-every stage, from experiment code to analysis to adversarial review of my own
-conclusions. This tutorial's prose was drafted by that assistant. The
-accompanying `medaudit` toolkit — implementation, tests, demo — was largely
-written by it, generalising my research code. It also ran the citation checks and
-a multi-agent adversarial review of this draft, which removed several errors of
-mine and several of its own — including a claim in §2 that my own records had
-already marked unclaimable, and which I had let through.
+The rules ask which tools were used and how, so: an AI coding assistant (Claude,
+via Claude Code) was used throughout this work. It assisted the underlying
+cystoscopy audit — experiment code, analysis, and adversarial review of my own
+conclusions. It drafted this tutorial's prose. It implemented the accompanying
+`medaudit` toolkit, generalising my research code to a dataset-agnostic tool. It
+checked the citations, and it ran an adversarial review of this draft that caught
+errors on both sides — including a claim in §2 that my own records had already
+marked unclaimable, and that I had let through.
 
-What is mine: the choice of problem, the direction of the work, the decisions
+What is mine: the choice of problem, the direction of the work, the judgments
 about what could and could not be claimed, and — the part I would defend hardest
 — the decision to retract the four findings in §6 rather than publish the
 flattering versions of them. I take responsibility for everything asserted here.
-
-I disclose this in full knowing the challenge encourages unassisted submissions.
-A tutorial about not overclaiming should not open with one.
 
 ---
 
