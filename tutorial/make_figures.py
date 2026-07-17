@@ -263,9 +263,66 @@ def fig_calibration():
     print(f"  wrote assets/calibration.png  (AUROC internal {ai:.3f}, external {ae:.3f})")
 
 
+def fig_roadmap():
+    """§1: the four audits at a glance. Doubles as (i) a structural map for a
+    new-Masters reader, (ii) the honest 'what each audit does NOT establish'
+    column that is this tutorial's spine, and (iii) the disclosure that only two
+    of the four run from one command — the rest you compose from primitives.
+    A booktabs-style table (no vertical rules); wrapped by hand to fit columns."""
+    # columns: (left x in axes fraction, header)
+    cx = [0.010, 0.200, 0.520, 0.855]
+    headers = ["audit", "what it detects", "what it does NOT establish",
+               "one command?"]
+    rows = [
+        ("Shortcut", "§2", "an attribute is encoded\nin the features",
+         "that the model uses it", "yes"),
+        ("Leakage", "§3", "near-duplicate & group\noverlap across the split",
+         "a clean split when you\ngave no group ids", "yes"),
+        ("Calibration", "§4", "whether scores are\nreal probabilities",
+         "discrimination; verdicts\nunder ~30 clusters", "compose"),
+        ("Prevalence", "§5", "PPV at the deployment\nbase rate",
+         "what AUROC shows —\nit is prevalence-blind", "compose"),
+    ]
+    ry = [0.685, 0.505, 0.325, 0.145]           # row centres
+    fig, ax = plt.subplots(figsize=(7.4, 2.9))
+    ax.axis("off")
+    ax.set_xlim(0, 1); ax.set_ylim(0, 1)
+
+    def rule(y, lw, color="#4a4a4a"):
+        ax.plot([0.005, 0.995], [y, y], lw=lw, color=color, zorder=1)
+
+    rule(0.965, 1.0)                            # top
+    for i, h in enumerate(headers):
+        ax.text(cx[i], 0.885, h, fontsize=7.8, fontweight="bold", color=INK,
+                va="center", ha="left")
+    rule(0.815, 0.8)                            # under header
+    for k, (name, sec, det, notdet, one) in enumerate(rows):
+        y = ry[k]
+        if k:                                   # faint inter-row separators
+            rule((ry[k - 1] + y) / 2, 0.4, "#d8dade")
+        ax.text(cx[0], y, name, fontsize=7.8, fontweight="bold", color=INK,
+                va="center", ha="left")
+        ax.text(cx[0] + 0.115, y, sec, fontsize=7.0, color="#8a8f98",
+                va="center", ha="left")
+        ax.text(cx[1], y, det, fontsize=7.3, color=INK, va="center", ha="left")
+        ax.text(cx[2], y, notdet, fontsize=7.3, color=MUTED, va="center", ha="left")
+        c = DATA if one == "yes" else "#8a8f98"
+        ax.text(cx[3], y, one, fontsize=7.6, color=c, va="center", ha="left",
+                fontweight="bold" if one == "yes" else "normal")
+    rule(0.055, 1.0)                            # bottom
+    ax.text(0.010, -0.02,
+            "yes = runs from one command (medaudit audit)      compose = "
+            "assemble from the toolkit's tested metric primitives (§4, §5)",
+            fontsize=6.6, color="#8a8f98", va="top", ha="left")
+    fig.savefig(os.path.join(OUT, "roadmap.png"))
+    plt.close(fig)
+    print("  wrote assets/roadmap.png")
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     fig_prevalence()
     fig_probe()
     fig_calibration()
+    fig_roadmap()
     print("figures in", OUT)
