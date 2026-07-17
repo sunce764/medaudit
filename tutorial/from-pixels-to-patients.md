@@ -370,7 +370,7 @@ honest thing this project did, and it is the transferable skill.
 ## 7. Run it yourself
 
 ```bash
-git clone <repo-url> && cd medaudit
+git clone https://github.com/sunce764/medaudit && cd medaudit
 pip install -e .               # numpy-only core; torch optional, for feature extraction
 medaudit audit --config audit.json
 ```
