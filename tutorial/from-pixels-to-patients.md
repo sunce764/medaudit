@@ -382,9 +382,9 @@ point, lo, hi = cluster_bootstrap(patient_id, lambda idx: auroc(scores[idx], y[i
 print(f"AUROC {point:.3f}  (95% CI {lo:.3f}–{hi:.3f})")
 ```
 
-When a resampled patient-subgroup has only one class, the statistic is undefined;
-`medaudit` drops those resamples and *warns you* that the subgroup is
-underpowered — because a silently-narrow CI is worse than an honestly-wide one.
+When a resampled subgroup holds only one class the statistic is undefined;
+`medaudit` drops those resamples and *warns* that the subgroup is underpowered —
+a silently-narrow CI being worse than an honestly wide one.
 
 ---
 
@@ -424,8 +424,7 @@ explanation for the calibration mismatch in #2. Leading, not established: that
 decomposition is itself single-seed and we have not confirmed it across seeds.
 Retracting one claim does not entitle you to assert its replacement.)
 
-**4. Hundreds of duplicates that never existed** — the dHash false alarm from
-Audit II.
+**4. Hundreds of duplicates that never existed** — the dHash false alarm from §3.
 
 **Why put this in a tutorial?** Because *self-skepticism is the method, not a
 disclaimer at the end.* Every one of those four was killed by a discipline that is
