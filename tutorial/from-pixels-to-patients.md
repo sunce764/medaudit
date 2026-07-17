@@ -29,18 +29,17 @@ the `medaudit` toolkit (open-source, MIT).
 ## 0. Would you deploy this?
 
 You train a classifier on cystoscopy images to flag malignant tissue against
-everything else. On an internal held-out split — malignant-vs-rest, on the
-white-light images — it reaches **AUROC 0.796**. Not
-spectacular — but then you get access to *another hospital's* data, and it holds:
-**0.808**. Discrimination transfers across centres. That is the result everyone
-hopes for and most papers do not get.
+everything else. On an internal held-out split — malignant-vs-rest, white-light
+images — it reaches **AUROC 0.796**. Not spectacular; but then you get *another
+hospital's* data, and it holds: **0.808**. Discrimination transfers across
+centres — the result everyone hopes for and most papers do not get.
 
 Your supervisor asks the only question that matters: *would you put this in a
 clinic?*
 
 The honest answer is: **you still don't know.** In the real audit those numbers
 came from, the model had all but memorised **which light source the endoscopist
-had switched on** — and a clinician switches to blue light precisely *when they
+had switched on** — and a clinician reaches for blue light precisely *when they
 already suspect a lesion*. Transferring discrimination did not mean the model had
 learned the biology.
 
@@ -74,21 +73,22 @@ img_0002.png,benign,patient_07,white_light
   spans train and test, and confidence intervals resample whole patients, not
   rows (images from one patient are not independent).
 - `attr_*` — any acquisition/metadata attribute you can record: imaging mode,
-  scanner, site, stain. **These are the audit's raw material** — the things a
-  model might latch onto instead of the biology.
+  scanner, site, stain. **The audit's raw material** — what a model might latch
+  onto instead of the biology.
 
-You also give it **features**: the penultimate-layer activations of your model
-(or any embedding) as an `(N, D)` array, row-aligned to the manifest. Auditing
-frozen features means the whole toolkit runs on a laptop — no GPU, no retraining.
+You also give it **features**: your model's penultimate-layer activations (or any
+embedding) as an `(N, D)` array, row-aligned to the manifest. Auditing frozen
+features means the toolkit runs on a laptop — no GPU, no retraining.
 
 ```python
 from medaudit.audit import run_audit          # or: medaudit audit --config audit.json
 report = run_audit("audit.json")
 ```
 
-The rest of this tutorial is what that report contains, one section at a time.
-The numbers you'll see come from the synthetic demo shipped in the repo, built
-to reproduce — in miniature — what a real audit turned up.
+The rest of this tutorial is what that audit covers — the first two from that one
+command, the last two composed from the same toolkit's primitives. Output blocks
+come from the synthetic demo; war-story numbers come from the real audit and are
+labelled as such.
 
 ---
 
@@ -452,17 +452,19 @@ medaudit audit --config tutorial/demo/leaked.json   # a planted leak, so you see
 ```
 
 **Be clear what the report is: two audits, not four.** `medaudit audit` runs the
-shortcut probe and the leakage audit, each with a cluster-bootstrap CI and a
-verdict. Calibration (§4) and prevalence (§5) are *not* wired in — you compose
+shortcut probe — with cluster-bootstrap intervals — and the leakage audit, which
+reports counts and the worst offending pairs rather than an interval, there being
+nothing to put one around. Both end in a verdict that states what it does *not*
+establish. Calibration (§4) and prevalence (§5) are *not* wired in; you compose
 them from `medaudit.metrics`, which is why those sections show library calls
 rather than report output. Four audits is the *checklist*; two are automated so
-far. Claiming otherwise would be the exact species of overclaim this piece is
-about, and you should meet that sentence here, not at the command line.
+far. Claiming otherwise would be the exact overclaim this piece is about, and you
+should meet that sentence here rather than at the command line.
 
 To audit your own model, extract penultimate-layer activations to an `(N, D)`
 `features.npy` aligned with your manifest rows. Feature extraction is out of scope
-by design — it is the only step needing your framework and GPU, and leaving it out
-is what lets the audit run anywhere.
+by design — the one step needing your framework and GPU, and leaving it out is
+what lets the audit run anywhere.
 
 **An audit narrows failure modes; it does not certify.** Every check here has a
 blind spot, named where it appears. The job is to move you from "AUROC 0.80,
