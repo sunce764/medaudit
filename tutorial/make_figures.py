@@ -80,7 +80,9 @@ def fig_prevalence():
             color=DATA, lw=1.1, dashes=(5, 3), label="specificity 0.99")
 
     # three read-points on the 0.95 curve; plain labels, no bold, no arrows
-    reads = {0.01: (10, -3, "left"), 0.10: (9, -11, "left"), 0.50: (-9, -13, "right")}
+    # 50% sits high-right; label it below-and-right where the curve only rises
+    # away — below-left would let the descending curve clip the text.
+    reads = {0.01: (10, -3, "left"), 0.10: (9, -11, "left"), 0.50: (13, -15, "left")}
     for p, (dx, dy, ha) in reads.items():
         v = ppv(0.90, 0.95, p)
         ax.plot(p * 100, v, "o", color=DATA, ms=4.5, zorder=4)
@@ -144,10 +146,13 @@ def fig_probe():
         ax.set_title(descr, loc="left", x=0.08, pad=6, color=INK, fontsize=8)
         _spare(ax)
     axes[0].set_ylabel("probe AUROC (95% CI)")
-    # name the two reference lines once, on the left panel, small and quiet
-    axes[0].annotate("0.60 decision line", (2.68, 0.615), ha="right",
+    # Name the two shared reference lines once. Panel (b)'s lower band is empty
+    # (every point there sits above 0.71), so long labels can go there without
+    # crossing any error bar — in panel (a) they would run through the benign /
+    # malignant whiskers, which both reach ~0.62.
+    axes[1].annotate("0.60 decision line", (-0.45, 0.618), ha="left",
                      fontsize=6.8, color=RULE)
-    axes[0].annotate("chance", (2.68, 0.505), ha="right",
+    axes[1].annotate("chance", (-0.45, 0.515), ha="left",
                      fontsize=6.8, color="#9a9a9a")
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "probe.png"))
