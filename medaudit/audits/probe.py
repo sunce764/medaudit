@@ -34,7 +34,22 @@ import numpy as np
 
 from ..metrics import auroc, cluster_bootstrap
 
-__all__ = ["linear_probe_auroc", "probe_report"]
+__all__ = ["linear_probe_auroc", "probe_report", "MARGIN", "L2_GRID", "N_REPEATS",
+           "SPREAD_FLAG"]
+
+# Ridge penalties the probe chooses among, by nested inner-CV on each training
+# fold. A probe must not hinge on one hand-picked penalty.
+L2_GRID = (0.1, 1.0, 10.0, 100.0)
+
+# How many independent fold partitions to repeat the whole out-of-fold pass over.
+# The reported point is the median; the spread across partitions is reported too,
+# so a verdict that depends on one lucky split is visible instead of hidden.
+N_REPEATS = 5
+
+# Flag the fold-partition spread only when it is wide enough to change the
+# reading. Ordinary resampling jitter is not instability, and reporting it as
+# such is the false-alarm habit this toolkit exists to break.
+SPREAD_FLAG = 0.05
 
 
 # --------------------------------------------------------------------------- #
@@ -76,9 +91,63 @@ def _ridge_scores(x_tr, y_tr, x_va, l2):
         return x_va @ w
 
 
-def _binary_probe(features, target, groups, l2, n_splits, seed):
-    """Out-of-fold linear-probe AUROC for a *binary* target, with a
-    group-cluster bootstrap CI. Returns ``dict`` or ``None`` if not evaluable."""
+def _oof_scores(features, target, groups, l2_grid, n_splits, seed):
+    """One out-of-fold pass. The ridge penalty is chosen by an INNER group-split
+    on each outer training fold — never on the fold being scored.
+
+    Sweeping l2 and keeping the best out-of-fold score would be selecting on the
+    very number we report: the same sin this toolkit exists to catch. So the
+    selection is nested, and the reported score never saw its own l2 chosen.
+    """
+    fold = _group_kfold(groups, n_splits, seed)
+    oof = np.full(len(target), np.nan)
+    chosen = []
+    for f in range(fold.max() + 1):
+        tr, va = fold != f, fold == f
+        if not va.any() or len(np.unique(target[tr])) < 2:
+            continue
+
+        # --- inner selection of l2, using only the outer-train rows ---------- #
+        best_l2, best_auc = l2_grid[0], -np.inf
+        if len(l2_grid) > 1:
+            itr_idx = np.where(tr)[0]
+            inner = _group_kfold(groups[itr_idx], min(3, len(np.unique(groups[itr_idx]))),
+                                 seed + 1)
+            for l2 in l2_grid:
+                isc = np.full(len(itr_idx), np.nan)
+                for g in np.unique(inner):
+                    a, b = inner != g, inner == g
+                    if not b.any() or len(np.unique(target[itr_idx][a])) < 2:
+                        continue
+                    isc[b] = _ridge_scores(features[itr_idx][a],
+                                           target[itr_idx][a].astype(float),
+                                           features[itr_idx][b], l2)
+                m = ~np.isnan(isc)
+                if m.sum() < 2 or len(np.unique(target[itr_idx][m])) < 2:
+                    continue
+                a_ = auroc(isc[m], target[itr_idx][m])
+                if not np.isnan(a_) and a_ > best_auc:
+                    best_auc, best_l2 = a_, l2
+        chosen.append(best_l2)
+        oof[va] = _ridge_scores(features[tr], target[tr].astype(float),
+                                features[va], best_l2)
+    return oof, chosen
+
+
+def _binary_probe(features, target, groups, l2, n_splits, seed,
+                  n_repeats=N_REPEATS):
+    """Out-of-fold linear-probe AUROC for a *binary* target.
+
+    Robustness this buys, and why it is needed: a probe verdict must not hinge on
+    one arbitrary fold partition or one arbitrary ridge penalty.
+      - ``l2`` may be a single value or a grid; a grid is selected by NESTED
+        inner-CV on each outer training fold (never on the scored fold).
+      - the whole out-of-fold pass is repeated over ``n_repeats`` different fold
+        partitions; the reported point is the MEDIAN across repeats, and
+        ``partition_spread`` reports the min/max so instability is visible rather
+        than hidden.
+    The CI comes from a group-cluster bootstrap on the median repeat.
+    """
     features = np.asarray(features, dtype=float)
     target = np.asarray(target, dtype=int)
     groups = np.asarray(groups)
@@ -87,32 +156,41 @@ def _binary_probe(features, target, groups, l2, n_splits, seed):
         return None  # only one attribute value present -> nothing to decode
     if len(np.unique(groups)) < n_splits:
         n_splits = max(2, len(np.unique(groups)))
+    l2_grid = tuple(l2) if isinstance(l2, (list, tuple)) else (l2,)
 
-    fold = _group_kfold(groups, n_splits, seed)
-    oof = np.full(len(target), np.nan)
-    for f in range(fold.max() + 1):
-        tr = fold != f
-        va = fold == f
-        if not va.any() or len(np.unique(target[tr])) < 2:
-            continue  # can't fit a 2-class probe on this train fold
-        oof[va] = _ridge_scores(features[tr], target[tr].astype(float),
-                                features[va], l2)
-
-    valid = ~np.isnan(oof)
-    if valid.sum() < 2 or len(np.unique(target[valid])) < 2:
+    runs = []
+    for r in range(max(1, n_repeats)):
+        oof, chosen = _oof_scores(features, target, groups, l2_grid,
+                                  n_splits, seed + 100 * r)
+        valid = ~np.isnan(oof)
+        if valid.sum() < 2 or len(np.unique(target[valid])) < 2:
+            continue
+        a_ = auroc(oof[valid], target[valid])
+        if not np.isnan(a_):
+            runs.append((a_, oof, valid, chosen))
+    if not runs:
         return None
+
+    aurocs = np.array([r[0] for r in runs])
+    med_i = int(np.argsort(aurocs)[len(aurocs) // 2])       # median repeat
+    _, oof, valid, chosen = runs[med_i]
+
     v = np.where(valid)[0]
     sc, tg, gr = oof[v], target[v], groups[v]
-
-    point, lo, hi, vf = cluster_bootstrap(
+    _, lo, hi, vf = cluster_bootstrap(
         gr, lambda idx: auroc(sc[idx], tg[idx]),
         n_boot=2000, seed=seed, verbose=False, return_valid_frac=True)
-    return {"auroc": float(point), "ci": (float(lo), float(hi)),
+
+    return {"auroc": float(np.median(aurocs)),
+            "ci": (float(lo), float(hi)),
+            "partition_spread": (float(aurocs.min()), float(aurocs.max())),
+            "n_repeats": int(len(aurocs)),
+            "l2_chosen": sorted(set(float(c) for c in chosen)),
             "n": int(valid.sum()), "n_groups": int(len(np.unique(gr))),
             "valid_frac": float(vf), "ci_kind": "matched"}
 
 
-def linear_probe_auroc(features, target, groups, l2=1.0, n_splits=5, seed=42):
+def linear_probe_auroc(features, target, groups, l2=L2_GRID, n_splits=5, seed=42):
     """Group-aware, out-of-fold linear-probe AUROC that an attribute is decodable
     from ``features``.
 
@@ -151,8 +229,13 @@ def linear_probe_auroc(features, target, groups, l2=1.0, n_splits=5, seed=42):
 # --------------------------------------------------------------------------- #
 # report
 # --------------------------------------------------------------------------- #
-# A probe only counts as 'positive' if the CI lower bound clears chance by this
-# margin (printed in the report so the threshold is never hidden).
+# A probe counts as 'positive' only if the CI lower bound clears chance by this
+# margin. The value is a convention, not a derived constant: 0.5 is chance, and
+# requiring the *lower bound* to clear 0.60 asks for an effect that is both
+# statistically resolved and large enough to matter, rather than merely
+# significant. It is deliberately blunt, it is printed in every report, and it is
+# a keyword argument — if it decides your conclusion, your evidence is too thin
+# and you should say so instead of tuning it.
 MARGIN = 0.60
 
 
@@ -186,13 +269,26 @@ def _verdict(overall, within):
     hits = [c for c, r in ran.items() if r["ci"][0] > MARGIN]
 
     if lo > MARGIN:                                    # decodable overall
-        if hits:
+        # Multiplicity: one within-class probe clearing the margin out of many
+        # is what you expect to happen by chance when you run many. The strong
+        # verdict therefore requires EVERY evaluable class to clear it; a subset
+        # is reported as MIXED, not promoted.
+        if hits and len(hits) == len(ran):
             return ("SHORTCUT ENCODED", _pow(
                 "the attribute is linearly decodable from the features and remains "
-                f"decodable within fixed classes ({', '.join(hits)}) — encoded "
-                "beyond class-collinearity. It is therefore available to the model "
-                "as a potential shortcut; IF the decision head relies on it, expect "
-                "degradation when its link to the label shifts", overall))
+                f"decodable within every fixed class tested ({', '.join(hits)}) — "
+                "encoded beyond class-collinearity. It is therefore available to "
+                "the model as a potential shortcut; IF the decision head relies on "
+                "it, expect degradation when its link to the label shifts. Note "
+                "this shows the attribute is *encoded*, not that it is *used*",
+                overall))
+        if hits:                                       # some classes, not all
+            miss = [c for c in ran if c not in hits]
+            return ("MIXED", _pow(
+                f"decodable overall and within some classes ({', '.join(hits)}) but "
+                f"not others ({', '.join(miss)}). With several classes tested, one "
+                "clearing the margin is weak evidence — treat this as a lead to "
+                "investigate per class, not as an established shortcut", overall))
         if ran:                                        # ran, none cleared the margin
             return ("AMBIGUOUS", _pow(
                 "decodable overall but not within any single fixed class — the "
@@ -214,7 +310,7 @@ def _verdict(overall, within):
 
 
 def probe_report(features, attr_codes, labels, groups, *, attr_name="attribute",
-                 attr_values=None, class_names=None, l2=1.0, n_splits=5, seed=42,
+                 attr_values=None, class_names=None, l2=L2_GRID, n_splits=5, seed=42,
                  min_per_class=40):
     """Full shortcut-probe audit for one metadata attribute.
 
@@ -271,17 +367,34 @@ def format_report(rep):
         if "skipped" in r:
             return f"skipped ({r['skipped']})"
         lo, hi = r["ci"]
-        s = f"AUROC {r['auroc']:.3f}  (95% CI {lo:.3f}–{hi:.3f}, n={r['n']}"
+        # n_groups, not n, is the effective sample size: rows from one patient
+        # move together, so 900 images from 20 patients is a study of 20.
+        s = (f"AUROC {r['auroc']:.3f}  (95% CI {lo:.3f}–{hi:.3f}; "
+             f"{r.get('n_groups', '?')} groups, {r['n']} rows")
         vf = r.get("valid_frac")
         if vf is not None and vf < 0.90:
-            s += f", only {vf:.0%} valid resamples — underpowered"
+            s += f"; only {vf:.0%} valid resamples — underpowered"
         s += ")"
+        sp = r.get("partition_spread")
+        # Only flag a spread wide enough to change how you'd read the number.
+        # A tighter trigger would cry wolf on ordinary resampling jitter — the
+        # exact false-alarm habit this toolkit is meant to break.
+        if sp and (sp[1] - sp[0]) > SPREAD_FLAG:
+            s += f"\n{' ' * 17}fold-partition spread {sp[0]:.3f}–{sp[1]:.3f} over " \
+                 f"{r.get('n_repeats', '?')} partitions — the verdict is partly a " \
+                 f"function of which split you drew"
+        ng = r.get("n_groups")
+        if isinstance(ng, int) and ng < 30:
+            s += f"\n{' ' * 17}CAUTION: {ng} groups. Below ~30–40 clusters the " \
+                 "percentile cluster bootstrap is anti-conservative — this " \
+                 "interval is likely too narrow. Treat as inconclusive."
         if r.get("ci_kind") == "widest_ovr":
             s += "  [multi-class: point=macro-AUROC; CI=widest per-class CI, not macro CI]"
         return s
 
     lines = [f"shortcut probe · attribute = {rep['attribute']!r}  "
-             f"(decodable if CI lower bound > {MARGIN:.2f})",
+             f"(positive if CI lower bound > {MARGIN:.2f}; point = median over "
+             f"fold partitions)",
              f"  overall        {fmt(rep['overall'])}"]
     for cname, r in rep["within_class"].items():
         lines.append(f"  within {cname:12s} {fmt(r)}")

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "medaudit"
-version = "0.1.0"
-description = "A reliability audit toolkit for medical-image classifiers: shortcut, leakage, calibration and prevalence checks in one report."
+dynamic = ["version"]
+description = "A reliability audit toolkit for medical-image classifiers: acquisition-shortcut and leakage audits on frozen features, with patient-clustered confidence intervals."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -13,8 +13,9 @@ keywords = ["medical-imaging", "trustworthy-ml", "shortcut-learning", "calibrati
 dependencies = ["numpy>=1.21"]
 
 [project.optional-dependencies]
-# heavy deps only needed for the model-based audits (probe / leakage-embedding / external eval)
-audit = ["torch>=2.0", "torchvision>=0.15", "pillow>=9", "matplotlib>=3.5"]
+# Not needed by any audit: the toolkit is numpy-only and consumes features you extract
+# yourself. These are here only for the optional figure/demo helpers.
+figures = ["matplotlib>=3.5"]
 dev = ["pytest>=7"]
 
 [project.scripts]
@@ -23,3 +24,6 @@ medaudit = "medaudit.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["medaudit*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "medaudit.__version__" }

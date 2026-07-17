@@ -7,26 +7,30 @@
 the `medaudit` toolkit (open-source, MIT).
 
 > **Audience & goal.** For Masters/PhD readers who can train a classifier but
-> have not yet had one fail *silently*. By the end you will be able to run four
-> reliability audits — shortcut, leakage, calibration, prevalence — on your own
-> model, from one command, and read the results the way a reviewer would. Every
-> code block runs on synthetic data shipped with the toolkit; the war stories
-> come from a real audit of a classifier trained on a 2025 public cystoscopy
-> dataset.
+> have not yet had one fail *silently*. By the end you will be able to run the
+> **shortcut** and **leakage** audits on your own model from one command, and
+> compute **calibration** and **prevalence** yourself from the toolkit's tested
+> metric primitives (§4, §5) — and, more to the point, read all four the way a
+> reviewer would.
 >
-> **About those war-story numbers.** They are **single-seed** results from one
-> audit. They are here to show you *what the audit does and how to read it* — not
-> as settled claims about that dataset; a single seed cannot separate a real
-> effect from checkpoint-selection luck. Flagging that is not throat-clearing:
-> it is the first instance of the discipline this whole tutorial is about, and
-> §6 is entirely about what happened when we forgot it.
+> **On the data.** Every code block runs on a synthetic cohort — deliberately.
+> The dataset behind the war stories cannot be redistributed, and a tutorial you
+> can only run with restricted access is a tutorial nobody runs. Synthetic data
+> also buys what real data cannot: **we know the ground truth**, so §2 can show
+> the audit getting it right *and* getting it convincingly wrong. The war stories
+> supply the rest — what happened to a real classifier trained on a 2025 public
+> cystoscopy dataset. Those figures are **single-seed**: they show you what the
+> audit does and how to read it, not settled claims about that dataset. Saying so
+> is not throat-clearing; it is the first instance of the discipline this whole
+> piece is about, and §6 is what happened when we forgot it.
 
 ---
 
 ## 0. Would you deploy this?
 
 You train a classifier on cystoscopy images to flag malignant tissue against
-everything else. On an internal held-out split it reaches **AUROC 0.796**. Not
+everything else. On an internal held-out split — malignant-vs-rest, on the
+white-light images — it reaches **AUROC 0.796**. Not
 spectacular — but then you get access to *another hospital's* data, and it holds:
 **0.808**. Discrimination transfers across centres. That is the result everyone
 hopes for and most papers do not get.
@@ -37,7 +41,7 @@ clinic?*
 The honest answer is: **you still don't know.** In the real audit those numbers
 came from, the model had all but memorised **which light source the endoscopist
 had switched on** — and a clinician switches to blue light precisely *when they
-already suspect cancer*. Transferring discrimination did not mean the model had
+already suspect a lesion*. Transferring discrimination did not mean the model had
 learned the biology.
 
 An AUROC tells you the model separates the classes *on data drawn like your test
@@ -90,6 +94,8 @@ to reproduce — in miniature — what a real audit turned up.
 
 ## 2. Audit I — the shortcut probe ★
 
+> ★ marks the two sections to read if you only read two.
+
 **The war story.** Before any model saw a pixel, the dataset already had a
 problem. Suspicious lesions had, in routine practice, been imaged more often
 under **blue light** — a contrast mode a clinician reaches for *when they already
@@ -120,21 +126,37 @@ print(probe.format_report(rep))
 ```
 
 On the real data the probe read imaging mode out of the frozen features at
-**AUROC 0.994** (95% CI 0.986–0.999). The representation had all but memorised
-the acquisition mode.
+**AUROC 0.994** (95% CI 0.986–0.999).
 
-And here is the part that should worry you most: we then tried to *remove* it.
-Adversarial de-biasing (a gradient-reversal head, GRL) moved the probe from
-**0.994 to 0.969**; Group-DRO [7] reached **0.947** — with all three confidence
-intervals overlapping, and every lower bound still ≥ 0.89, i.e. **nowhere near
-the 0.5 you'd get if the mode were truly gone.** Standard mitigation did not pull
-the shortcut out of the representation. (If you do reach for a mitigation, note
-the practical difference: Group-DRO [7] needs group labels throughout training
-and careful regularisation, whereas last-layer retraining [8] needs them only for
-a small reweighting set — much cheaper to try first.)
+**Now be unimpressed.** White light and blue light differ by a global colour
+transform: the two populations are *visibly* different to the human eye, before
+any question of pathology. Essentially *any* embedding will decode that at ~0.99
+— including a model that is scrupulously ignoring mode when it decides. A high
+probe here was never a discovery; it was a near-certainty.
 
-Detecting a shortcut is much easier than deleting one — which is exactly why you
-should detect it *before* you build on top of it.
+That defines what a probe is *for*. It answers **"is this attribute available to
+the model?"** — cheaply, on frozen features, in seconds. It does not answer **"is
+the model using it?"** For a visually dominant attribute the first answer is
+almost always yes, and all the interesting work lives in the second question. So
+`medaudit`'s verdict is hedged on purpose:
+
+> *…the attribute is available to the model as a potential shortcut; **IF** the
+> decision head relies on it, expect degradation when its link to the label shifts.
+> Note this shows the attribute is* encoded, *not that it is* used.
+
+The probe earns its keep on attributes you would **not** have guessed were
+visible — scanner model, site, acquisition date, a stain batch. There, "available
+at all?" is genuinely news.
+
+**And detecting a shortcut is far easier than removing one.** We tried:
+adversarial de-biasing (a gradient-reversal head, GRL) moved the probe only from
+**0.994 to 0.969** — indistinguishable from noise at this CI width, and nowhere
+near the 0.5 you would get if mode were gone. That is one mitigation, properly
+configured, failing to erase one attribute; it is not a verdict on de-biasing in
+general, and we do not have the evidence for one. (If you do reach for a
+mitigation: Group-DRO [7] needs group labels throughout training plus careful
+regularisation; last-layer retraining [8] needs them only for a small reweighting
+set — cheaper to try first.)
 
 **The trap in the probe — and how to escape it.** A high overall probe score is
 *ambiguous*. If mode is correlated with the diagnosis (it was, at OR 33×), a probe
@@ -144,42 +166,59 @@ second probe **within each fixed class**: among malignant-only images, can you
 still decode mode? Holding the diagnosis constant removes the class-collinearity
 explanation.
 
-This distinction is the whole game, and it is worth seeing it fail safely on
-synthetic data. In the demo we construct features that encode *only the class*,
-with the attribute merely correlated with it:
+**Be precise about what that buys**, because it is less than it looks. The
+within-class probe removes the ***label*-collinearity** explanation. It does not
+remove a ***severity*-collinearity** one. The endoscopist chose blue light by
+*looking* — so within the malignant class, the blue-lit lesions are plausibly the
+ones that looked worse. A positive within-class probe is then consistent with two
+stories: the features encode the light source, or they encode *how advanced the
+lesion is*, which predicts the light source. Conditioning on a coarse label holds
+the paperwork constant, not the biology. Separating those needs something the
+probe cannot give you — a severity covariate to condition on too, or an attribute
+assigned independently of appearance. Say which one you have.
+
+Still, the distinction is the whole game, and it is worth watching it work where
+we know the answer. `tutorial/make_demo.py` builds two cohorts differing in
+**exactly one variable**: whether the features encode mode at all (`beta`). The
+85/15 mode-class correlation, the class signal, the noise, the patient structure,
+the sample size — identical. (A tutorial that tells you to control your variables
+has to control its own. An earlier draft changed the correlation *and* the
+encoding at once, which made the comparison worthless; that draft is why this
+parenthesis exists.)
+
+**Case A — the features encode only the class.** Mode is never written into them:
 
 ```
-shortcut probe · attribute = 'mode'  (decodable if CI lower bound > 0.60)
-  overall        AUROC 0.821  (95% CI 0.774–0.868, n=900)
-  within benign       AUROC 0.463  (95% CI 0.376–0.547, n=456)
-  within malignant    AUROC 0.458  (95% CI 0.392–0.526, n=444)
+shortcut probe · attribute = 'mode'  (positive if CI lower bound > 0.60; point = median over fold partitions)
+  overall        AUROC 0.841  (95% CI 0.796–0.884; 300 groups, 900 rows)
+  within benign       AUROC 0.551  (95% CI 0.488–0.620; 149 groups, 447 rows)
+  within malignant    AUROC 0.571  (95% CI 0.510–0.629; 151 groups, 453 rows)
   -> AMBIGUOUS: decodable overall but not within any single fixed class — the
      overall signal may be driven by class-collinearity rather than a genuinely
      encoded attribute; gather more per-class samples
 ```
 
-Overall 0.82 *looks* like an encoded shortcut. The within-class probes sitting on
-0.5 reveal it is not — the features never carried mode, only class. Report the
-overall number alone and you cry wolf. Now the genuinely-encoded case:
+**Case B — identical cohort; the features also encode mode.** One variable moved:
 
 ```
-shortcut probe · attribute = 'mode'  (decodable if CI lower bound > 0.60)
-  overall        AUROC 0.996  (95% CI 0.993–0.999, n=660)
-  within benign       AUROC 0.998  (95% CI 0.995–1.000, n=360)
-  within malignant    AUROC 0.994  (95% CI 0.987–0.998, n=300)
-  -> SHORTCUT ENCODED: … remains decodable within fixed classes (benign,
-     malignant) — encoded beyond class-collinearity. It is therefore available to
-     the model as a potential shortcut; IF the decision head relies on it, expect
-     degradation when its link to the label shifts
+shortcut probe · attribute = 'mode'  (positive if CI lower bound > 0.60; point = median over fold partitions)
+  overall        AUROC 0.905  (95% CI 0.873–0.933; 300 groups, 900 rows)
+  within benign       AUROC 0.786  (95% CI 0.734–0.835; 149 groups, 447 rows)
+  within malignant    AUROC 0.768  (95% CI 0.713–0.821; 151 groups, 453 rows)
+  -> SHORTCUT ENCODED: … remains decodable within every fixed class tested
+     (benign, malignant) — encoded beyond class-collinearity …
 ```
 
-Same headline number, opposite verdict. **The within-class probe is what turns a
-suggestive correlation into evidence.**
+Look at the headlines: **0.84 and 0.91**. Both high. Both, on their own, look
+like a model that has learned the light source. One of them is a model that never
+saw mode at all. **The headline cannot tell them apart — the within-class row can.**
+In case A it drops to chance; in case B it stays up.
 
-Notice the hedge in that last verdict — *"available to the model … IF the decision
-head relies on it."* A probe shows the attribute is **encoded in the features**;
-that is not the same as proving the classifier **uses** it. Stating the weaker,
-true claim is the difference between an audit and a scare story.
+Two details there do quiet work. **"300 groups, 900 rows"**: the group count is
+the sample size that matters — three images of one patient are not three
+observations. And **"median over fold partitions"**: the pass runs five times over
+different splits, because a verdict that changes with the split you drew is not a
+verdict. When the runs disagree, the report says so.
 
 **A caution that matters.** A linear probe near chance does *not* prove the model
 is clean — it only rules out a *linearly* decodable shortcut. Non-linear
@@ -198,7 +237,10 @@ by an amount you cannot see in the AUROC.
 Two kinds of leakage, both silent:
 
 1. **Group leakage** — the same patient in two splits. Cheap to check exactly
-   from ids; `medaudit` does it and refuses to trust a split that fails.
+   from ids; `medaudit` checks it exactly and returns a GROUP LEAKAGE verdict
+   telling you to fix the split before trusting any metric. It reports; it does
+   not gate — and it can only run this check on a split you actually give it
+   (see §1). Ask for it explicitly, or it silently reports NOT ASSESSED.
 2. **Near-duplicate leakage** — visually near-identical images with *no shared
    id*. There is no key to join on; you must compare the images themselves.
 
@@ -209,9 +251,18 @@ a dHash scan reported **hundreds of cross-split "duplicates"** that were, on
 visual inspection, simply *different images of the same kind of tissue.* We
 verified by eye that a hash-distance-zero pair was two genuinely different frames.
 
-The right instrument is **cosine similarity in a learned embedding space**
-(an ImageNet backbone, or the model's own features): it keeps true
-near-duplicates separable from merely same-domain images.
+The right instrument is **cosine similarity in a learned embedding space**: it
+keeps true near-duplicates separable from merely same-domain images.
+
+**But not just any embedding — here §2 comes back to bite.** The obvious move is
+to reuse the model's own features. Don't, not naively: §2 established that they
+decode mode at 0.994, so a **giant mode axis** runs through that space. Cosine
+similarity in it is dominated by "were these shot under the same light?", and
+your detector will rank two unrelated blue-light frames above a genuine duplicate
+pair — rebuilding the dHash failure with better tooling. Use an embedding
+independent of the attribute you are worried about (a generic ImageNet backbone
+is usually fine), or residualise that direction out first. Having just proved a
+space is dominated by an axis, you cannot use distances in it as if it weren't.
 
 ```python
 from medaudit.audits import leakage
@@ -229,7 +280,21 @@ matches your domain's homogeneity, and always eyeball what it flags.*
 
 ---
 
-## 4. Audit III — calibration
+## 4. Audit III — calibration ★
+
+**This is the section that mattered most in the real audit, and it is the one you
+are most likely to skip.**
+
+Go back to §0. Internal white-light malignant AUROC **0.796**; external **0.808**.
+Discrimination transferred — that part was genuinely good news. And yet, applying
+the *same* decision rule (P > 0.5) on both, sensitivity fell from **0.570** to
+**0.378**. Same ranking ability. Same threshold. A third of the sensitivity, gone.
+
+Nothing about the model's ability to *order* patients broke. What broke was the
+mapping from its scores to probabilities — so a threshold calibrated in one
+hospital sat in the wrong place in the other. **The ROC curves are nearly
+superimposed while the reliability curves come apart.** If you only ever plot the
+ROC, this failure is invisible: it lives entirely in the axis AUROC discards.
 
 AUROC only cares about the *ranking* of scores [9]. It is completely blind to
 whether a "0.9" means 90%. A model can rank perfectly and still be systematically
@@ -258,6 +323,20 @@ Two habits worth teaching:
 - **Calibrate on data the model was not selected on.** Picking a temperature on
   the same split you report calibration for is the calibration version of
   training on the test set.
+- **Count your clusters, not your images.** This is where the real audit ran out
+  of road. Its blue-light malignant subset was 51 images — but only ~20 patients,
+  which at 15 bins is about 3 samples per bin. We reported a per-mode ECE ranking
+  off that, then withdrew it: at that size the number is noise wearing a decimal
+  point. **Below roughly 30–40 clusters, stop.** Report Brier with a cluster
+  bootstrap, say the subgroup is underpowered, and resist the ranking. `medaudit`
+  now prints the group count next to every interval, and warns when it is small,
+  precisely because "n=51" reads as reassuring and "20 patients" does not.
+
+And one caution the toolkit cannot fix for you: the percentile cluster bootstrap
+it ships is itself **anti-conservative at small cluster counts** — the interval it
+draws around 20 patients is narrower than the truth. An honest CI is not the same
+as a correct one. When the group count is low, the right output is "inconclusive",
+not a tighter-looking bar.
 
 ---
 
@@ -285,12 +364,16 @@ Hold sensitivity at 0.90 and specificity at a strong 0.95. At 50% prevalence,
 PPV = **0.95**. At 10% it is already **0.67**. At **1% prevalence the same model
 gives PPV = 0.15** — roughly **85% of its flags are false alarms**, and about six
 and a half flags for every true positive found. Not one number describing the
-model changed. Prevalence did all of it. This is not a thought experiment: screening challenges
-now score exactly this. Barrett's oesophagus neoplasia detection at EndoVis/MICCAI
-2026, for instance, ranks entries by *PPV at 90% recall, evaluated under a
-simulated ~1% prevalence*. Leaderboard numbers there look crushingly low next to
-the AUROCs in the same papers — which is the point of the metric, because the low
-number is the one the clinic actually experiences.
+model changed. Prevalence did all of it.
+
+This is not a thought experiment — screening challenges now score exactly this.
+The **RARE25** challenge at EndoVis/MICCAI 2025, on early Barrett's oesophagus
+neoplasia detection, ranked entries by *PPV at 90% recall under a simulated ~1%
+prevalence* (neoplasia resampled 1:100, repeated 1000×, scored as the median).
+Teams reported AUROCs above 0.9; the winning entry's median bootstrapped
+PPV@90%recall was **0.035** [15]. That is not a bad model — it is what a good
+model looks like when you finally ask it the question the clinic asks. If you
+report only the AUROC, you have not told the reader the number they need.
 
 Two things to do:
 
@@ -299,7 +382,7 @@ Two things to do:
   If the deployment base rate differs from training, the classifier's outputs can
   be corrected for the new prior rather than merely re-thresholded [6].
 - **Give it an honest confidence interval.** Use the **cluster bootstrap** —
-  resample whole patients, not rows [14, 13]. A per-image bootstrap understates
+  resample whole patients, not rows [13; 14, ch. 3]. A per-image bootstrap understates
   uncertainty because one patient's frames move together; it is the same
   independence assumption that group-aware splitting protects in §1, showing up
   again in your error bars.
@@ -324,8 +407,10 @@ of headlines we **retracted ourselves.** Four, each with a transferable lesson.
 **1. We compared apples to oranges.** Our first alarming result: malignant
 sensitivity fell from **0.586 internally to 0.378 externally**. Except the
 internal number was computed by `argmax` over five classes and the external one
-by thresholding *P > 0.5* — two different decision rules. Half the "collapse" was
-a unit error. *Lesson: before you explain a gap, check that both sides were
+by thresholding *P > 0.5* — two different decision rules. Measured like for like
+(0.570 → 0.378), the unit error accounted for about **8%** of the gap, not half —
+but until we fixed it we could not know that, and it is the first thing an honest
+reader would have asked. *Lesson: before you explain a gap, check that both sides were
 measured the same way.*
 
 **2. "The external collapse proves the shortcut fails on new data."** It doesn't
@@ -345,49 +430,59 @@ and a prevalence shift offset each other. It died twice over. First, a
 prevalence effect cannot be used to argue about one. Second, re-measured with a
 prevalence-*sensitive* metric, the effect was **≈ 0**. There was never a signal to
 explain. (The prevalence shift was real and large — malignant 9% internally vs
-65% externally — which is precisely why it, not the shortcut, deserves the credit
-for the calibration mismatch in #2.)
+65% externally — which is why it, rather than the shortcut, is the *leading*
+explanation for the calibration mismatch in #2. Leading, not established: that
+decomposition is itself single-seed and we have not confirmed it across seeds.
+Retracting one claim does not entitle you to assert its replacement.)
 
 **4. Hundreds of duplicates that never existed** — the dHash false alarm from
 Audit II.
 
 **Why put this in a tutorial?** Because *self-skepticism is the method, not a
 disclaimer at the end.* Every one of those four was killed by a discipline that is
-cheap to apply and boring to describe: compare like with like; pick a metric that
-can see your claim; get an honest CI; match the instrument to the domain. That is
-the same discipline that catches someone else's over-claim in review. An audit you
-cannot fail is not an audit.
-
-**Why put this in a tutorial?** Because *self-skepticism is the method, not a
-disclaimer at the end.* The discipline that kills your own favourite result — the
-right metric for the claim, an honest CI, an instrument matched to the domain — is
-the same discipline that would have caught someone else's over-claim in review.
-An audit you cannot fail is not an audit. Reporting the retraction is the most
-honest thing this project did, and it is the transferable skill.
+cheap to apply and boring to describe: **compare like with like; pick a metric
+that can see your claim; get an honest CI; match the instrument to the domain.**
+That list is the payload of this whole piece. It is the same discipline that would
+have caught someone else's over-claim in review — which is why practising it on
+your own results is not self-flagellation, it is training. An audit you cannot
+fail is not an audit. Reporting the retraction is the most honest thing this
+project did, and it is the transferable skill.
 
 ---
 
 ## 7. Run it yourself
 
+Everything below is the sequence re-run from a clean clone before submitting.
+
 ```bash
 git clone https://github.com/sunce764/medaudit && cd medaudit
-pip install -e .               # numpy-only core; torch optional, for feature extraction
-medaudit audit --config audit.json
+pip install -e .                                    # numpy only — no torch, no sklearn
+python tutorial/make_demo.py                        # builds the cohort, prints the reports
+medaudit audit --config tutorial/demo/audit.json    # the same audit via the CLI
+medaudit audit --config tutorial/demo/leaked.json   # a planted leak, so you see it fire
 ```
 
-`audit.json` points at your manifest and a precomputed `features.npy`; the report
-prints the four audits with confidence intervals and a plain-language verdict for
-each. Point it at your own model's features and metadata and you have, in one
-command, the checks this tutorial walked through.
+**Be clear what the report is: two audits, not four.** `medaudit audit` runs the
+shortcut probe and the leakage audit, each with a cluster-bootstrap CI and a
+verdict. Calibration (§4) and prevalence (§5) are *not* wired in — you compose
+them from `medaudit.metrics`, which is why those sections show library calls
+rather than report output. Four audits is the *checklist*; two are automated so
+far. Claiming otherwise would be the exact species of overclaim this piece is
+about, and you should meet that sentence here, not at the command line.
 
-**What an audit does and does not give you.** It narrows failure modes — a
-linear probe that clears chance is real evidence of an encoded shortcut; one that
-doesn't is *not* a clean bill of health (non-linear shortcuts survive). Embedding
-duplicate-detection misses what the embedding can't see. Calibration on a held-out
-split doesn't guarantee calibration in a new hospital. The audit's job is to move
-you from "AUROC 0.92, ship it" to a defensible, itemised account of *what you
-checked, what you found, and what you still don't know* — which is exactly the
-account a clinical reviewer, and a patient, deserve.
+To audit your own model, extract penultimate-layer activations to an `(N, D)`
+`features.npy` aligned with your manifest rows. Feature extraction is out of scope
+by design — it is the only step needing your framework and GPU, and leaving it out
+is what lets the audit run anywhere.
+
+**What an audit does and does not give you.** It narrows failure modes; it does
+not certify. A linear probe that clears the margin shows an attribute is *encoded*
+— not that the head uses it, and not that a non-linear shortcut is absent when the
+probe is quiet. Embedding duplicate-detection misses what the embedding cannot
+see. Calibration on a held-out split says nothing about a new hospital. The job is
+to move you from "AUROC 0.80, discrimination transfers, ship it" to a defensible,
+itemised account of *what you checked, what you found, and what you still don't
+know* — which is exactly the account a clinical reviewer, and a patient, deserve.
 
 From pixels to patients, the last mile is not a higher number. It is the audit
 that tells you whether the number means what you hoped.
@@ -396,14 +491,22 @@ that tells you whether the number means what you hoped.
 
 ## Code & reproducibility
 
-All code: the `medaudit` repository (MIT). Every metric is unit-tested against an
-independent brute-force reference (27 tests, `tests/`).
+All code: the `medaudit` repository (MIT). Each metric primitive in
+`medaudit.metrics` is checked against an independent brute-force reference written
+from its definition (`tests/test_metrics.py`) — including the quantile-binned ECE
+this tutorial recommends. The suite as a whole is 29 tests across metrics, splits,
+manifest, probe, leakage and the orchestrator.
 
-**Every number printed in this tutorial regenerates with one command:**
+**Reproducing the numbers.** §2's probe blocks and the full audit report
+regenerate exactly:
 
 ```bash
-python tutorial/make_demo.py          # prints §2's two probe reports and §1's full audit
+pip install -e . && python tutorial/make_demo.py
 ```
+
+The war-story figures in §0/§2/§3/§6 are aggregate results from the internal audit
+and do **not** regenerate from this repository — that data cannot be redistributed.
+§5's PPV values follow from the formula given there.
 
 No patient data is redistributed and none is needed to follow along: the runnable
 examples are synthetic by design, built to mirror the real audit's structure in
@@ -471,5 +574,11 @@ doi:10.1111/j.1467-9868.2007.00593.x
 
 [14] A. C. Davison and D. V. Hinkley. *Bootstrap Methods and their Application*.
 Cambridge University Press, 1997. ISBN 0-521-57471-4
+
+[15] T. J. M. Jaspers, F. Caetano, C. H. B. Claessens, C. H. J. Kusters, R. A. H.
+van Heslinga, F. Slooter, J. J. Bergman, P. H. N. De With, M. R. Jong, A. J. de
+Groof, and F. van der Sommen. Development and evaluation of CADe systems in a
+low-prevalence setting: the RARE25 challenge for early Barrett's neoplasia
+detection. arXiv:2604.11171. doi:10.48550/arXiv.2604.11171
 
 ---

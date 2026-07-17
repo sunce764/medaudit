@@ -14,5 +14,5 @@ from . import manifest  # noqa: F401
 from . import audits  # noqa: F401
 from . import audit  # noqa: F401
 
-__version__ = "0.2.0.dev0"
+__version__ = "0.2.0"
 __all__ = ["metrics", "splits", "manifest", "audits", "audit", "__version__"]
