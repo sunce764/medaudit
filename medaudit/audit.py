@@ -112,6 +112,21 @@ def run_audit_arrays(manifest, features, config=None):
         features, split_labels, leak_groups,
         threshold=lk.get("threshold", 0.90), top_k=lk.get("top_k", 50))
 
+    # Say WHY the group check was skipped. Passing leak_groups=None above makes
+    # leakage_report explain it as "no group ids supplied", which is false when
+    # the manifest carries them — we declined to check a split we generated
+    # ourselves. A wrong reason is worse than no reason.
+    if split_source == "generated" and not leak_report["group_assessed"]:
+        leak_report["group_note"] = (
+            "medaudit generated this split itself and made it group-clean by "
+            "construction, so checking it would prove nothing about your pipeline; "
+            "supply a 'split' column to audit your own assignment")
+        if leak_report["verdict"] == "CLEAN":
+            leak_report["detail"] = (
+                "group leakage NOT ASSESSED (" + leak_report["group_note"] + "). No "
+                f"cross-split pair at cosine ≥ {leak_report['threshold']}. Note this "
+                "only rules out near-duplicates the embedding can see")
+
     return {
         "n_rows": len(labels),
         "n_features": int(features.shape[1]),

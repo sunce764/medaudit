@@ -31,16 +31,21 @@ You train a classifier on cystoscopy images to flag malignant tissue against
 everything else. On an internal held-out split — malignant-vs-rest, white-light
 images — it reaches **AUROC 0.796**. Not spectacular; but then you get *another
 hospital's* data, and it holds: **0.808**. Discrimination transfers across
-centres — the result everyone hopes for and most papers do not get.
+centres — the result everyone hopes for and most papers do not get. (Caveat I owe
+you up front, in the spirit of §6: that external cohort differs from the internal
+one in centre *and* in how malignancy was labelled, so "transfers" is itself a
+claim with a known confound.)
 
 Your supervisor asks the only question that matters: *would you put this in a
 clinic?*
 
-The honest answer is: **you still don't know.** In the real audit those numbers
-came from, the model had all but memorised **which light source the endoscopist
-had switched on** — and a clinician reaches for blue light precisely *when they
-already suspect a lesion*. Transferring discrimination did not mean the model had
-learned the biology.
+The honest answer is: **you still don't know** — and neither did I. In the audit
+those numbers come from, the model's features encoded, at near-perfect accuracy,
+**which light source the endoscopist had switched on**. In that dataset, lesions
+were blue-lit far more often than ordinary tissue (odds ratio 33.5×). Whether the
+model *used* that is a much harder question than it sounds, and §2 is about why
+the obvious test does not answer it. §6 is about what happened when I answered it
+too fast.
 
 An AUROC tells you the model separates the classes *on data drawn like your test
 split*. It does not tell you *what* it separates them by, whether your test split
@@ -130,57 +135,12 @@ print(probe.format_report(rep))
 On the real data the probe read imaging mode out of the frozen features at
 **AUROC 0.994** (95% CI 0.986–0.999).
 
-**Now be unimpressed.** White and blue light differ by a global colour transform:
-the two populations are *visibly* different before any question of pathology.
-Essentially *any* embedding decodes that at ~0.99 — including a model scrupulously
-ignoring mode when it decides. A high probe here was never a discovery; it was a
-near-certainty.
-
-That defines what a probe is *for*. It answers **"is this attribute available to
-the model?"** — cheaply, on frozen features, in seconds. It does not answer **"is
-the model using it?"** For a visually dominant attribute the first answer is
-almost always yes, and all the interesting work lives in the second. So
-`medaudit`'s verdict is hedged on purpose:
-
-> *…the attribute is available to the model as a potential shortcut; **IF** the
-> decision head relies on it, expect degradation when its link to the label shifts.
-> Note this shows the attribute is* encoded, *not that it is* used.
-
-The probe earns its keep on attributes you would **not** have guessed were
-visible — scanner, site, acquisition date, stain batch. There, "available at
-all?" is news.
-
-**And detecting a shortcut is far easier than removing one.** We tried:
-adversarial de-biasing (a gradient-reversal head, GRL) moved the probe only from
-**0.994 to 0.969** — indistinguishable from noise at this CI width, and nowhere
-near the 0.5 you would get if mode were gone. That is one mitigation, properly
-configured, failing to erase one attribute; it is not a verdict on de-biasing in
-general, and we do not have the evidence for one. (If you do reach for a
-mitigation: Group-DRO [7] needs group labels throughout training plus careful
-regularisation; last-layer retraining [8] needs them only for a small reweighting
-set — cheaper to try first.)
-
-**The trap in the probe — and how to escape it.** A high overall probe score is
-*ambiguous*. If mode is correlated with the diagnosis (it was, at OR 33.5×), a probe
-can score high just by reading the *class* and exploiting the correlation — that
-is not the same as the features genuinely encoding mode. So `medaudit` runs a
-second probe **within each fixed class**: among malignant-only images, can you
-still decode mode? Holding the diagnosis constant removes the class-collinearity
-explanation.
-
-**Be precise about what that buys**, because it is less than it looks. The
-within-class probe removes the ***label*-collinearity** explanation, not a
-***severity*-collinearity** one. The endoscopist chose blue light by *looking*, so
-within the malignant class the blue-lit lesions are plausibly the ones that looked
-worse. A positive within-class probe is then consistent with two stories: the
-features encode the light source, or they encode *how advanced the lesion is*,
-which predicts it. Conditioning on a coarse label holds the paperwork constant,
-not the biology. Separating those needs a severity covariate to condition on too,
-or an attribute assigned independently of appearance. Say which you have.
-
-Still, the distinction is the whole game. `make_demo.py` builds two cohorts
-differing in **exactly one variable** — whether the features encode mode at all
-(`beta`). The 85/15 correlation, class signal, noise, patient structure and sample
+**A high score here is not the finding it looks like.** A high overall probe is
+*ambiguous* in two ways at once, and the demo below separates them. So
+`medaudit` runs a second probe **within each fixed class**: among malignant-only
+images, can you still decode mode? `make_demo.py` builds two cohorts differing in
+**exactly one variable** — whether the features encode mode at all (`beta`). The
+85/15 mode-class correlation, class signal, noise, patient structure and sample
 size are identical; a tutorial telling you to control your variables has to
 control its own.
 
@@ -207,22 +167,50 @@ shortcut probe · attribute = 'mode'  (positive if CI lower bound > 0.60; point 
      (benign, malignant) — encoded beyond class-collinearity …
 ```
 
-Look at the headlines: **0.84 and 0.91**. Both high. Both, on their own, look
-like a model that has learned the light source. One of them is a model that never
-saw mode at all. **The headline cannot tell them apart — the within-class row can.**
-In case A the within-class rows fall to 0.55–0.57 — near chance, and far below
-the 0.60 decision line; in case B they stay up near 0.77.
+![Probe AUROC for the controlled pair](assets/probe.png)
+
+Look at the headlines: **0.84 and 0.91**. Both high. Both, on their own, look like
+a model that has learned the light source. One of them is a model that never saw
+mode at all. **The headline cannot tell them apart — the within-class points can.**
+In case A they fall to 0.55–0.57, below the decision line (grey: not evidence); in
+case B they stay up near 0.77.
 
 Two details there do quiet work. **"300 groups, 900 rows"**: the group count is
 the sample size that matters — three images of one patient are not three
 observations. And **"median over fold partitions"**: the pass runs five times over
 different splits, because a verdict that changes with the split you drew is not a
-verdict. When the runs disagree, the report says so.
+verdict. (Why 0.60? It is a convention, not a derived constant. Requiring the CI
+*lower bound* to clear it asks for an effect both statistically resolved and large
+enough to matter. It is a keyword argument — **and if the threshold decides your
+conclusion, your evidence is too thin.**)
 
-**A caution that matters.** A linear probe near chance does *not* prove the model
-is clean — it only rules out a *linearly* decodable shortcut. Non-linear
-shortcuts exist. An audit narrows the space of failure modes; it never certifies
-their absence.
+### What the probe does not buy you
+
+**It cannot tell you the attribute is *used*.** White and blue light differ by a
+global colour transform — the populations are *visibly* different before any
+question of pathology, so essentially any embedding decodes mode at ~0.99,
+including a model scrupulously ignoring it when it decides. On the real data,
+0.994 was near-certain, not a discovery. The probe answers *"is this available to
+the model?"*, cheaply, on frozen features. Whether the head **uses** it is the
+harder question, and the report says so in as many words. The probe earns its keep
+on attributes you would not have guessed were visible: scanner, site, acquisition
+date, stain batch.
+
+**Within-class removes *label*-collinearity, not *severity*-collinearity.** And
+here I have to be careful about a claim I have made three times: that clinicians
+reach for blue light when they suspect a lesion. The **association** is in my data
+(OR 33.5×); the **selection mechanism** is my inference from it — I had no
+clinician to check it against. If it is right, then within the malignant class the
+blue-lit lesions are plausibly the ones that looked worse, and a positive
+within-class probe is consistent with two stories: the features encode the light,
+or they encode *how advanced the lesion is*, which predicts the light.
+Conditioning on a coarse label holds the paperwork constant, not the biology.
+Separating those needs a severity covariate, or an attribute assigned
+independently of appearance. Say which you have.
+
+**And a probe near chance proves nothing about cleanliness** — it rules out a
+*linearly* decodable shortcut, no more. An audit narrows failure modes; it never
+certifies their absence.
 
 ---
 
@@ -259,9 +247,10 @@ the model's own features. Don't: §2 showed they decode mode at 0.994, so a
 **giant mode axis** runs through that space. Cosine similarity in it is dominated
 by "shot under the same light?", and your detector will rank two unrelated
 blue-light frames above a genuine duplicate pair — rebuilding the dHash failure
-with better tooling. Use an embedding independent of the attribute you are
-worried about (a generic ImageNet backbone is usually fine), or residualise that
-direction out first.
+with better tooling. Use an embedding that is not entangled with *your label* — a
+stock ImageNet backbone qualifies — but do not imagine that buys you a colour-blind
+space: §2's point was that *any* embedding sees mode. Residualise that direction
+out either way, and probe your chosen space before you trust distances in it.
 
 ```python
 from medaudit.audits import leakage
@@ -352,20 +341,20 @@ PPV = ────────────────────────�
       sens · prev + (1 − spec)(1 − prev)
 ```
 
-Hold sensitivity at 0.90 and specificity at a strong 0.95. At 50% prevalence,
-PPV = **0.95**. At 10% it is already **0.67**. At **1% prevalence the same model
-gives PPV = 0.15** — roughly **85% of its flags are false alarms**, and about six
-and a half flags for every true positive found. Not one number describing the
-model changed. Prevalence did all of it.
+![PPV against prevalence for a fixed model](assets/prevalence.png)
+
+*One model, three clinics. Sensitivity 0.90 and specificity 0.95 throughout — not
+one number describing the model changes across this curve. At 1% prevalence, 85%
+of its flags are false alarms.*
 
 This is not a thought experiment — screening challenges now score exactly this.
 The **RARE25** challenge at EndoVis/MICCAI 2025, on early Barrett's oesophagus
 neoplasia detection, ranked entries by *PPV at 90% recall under a simulated ~1%
 prevalence* (neoplasia resampled 1:100, repeated 1000×, scored as the median).
 Teams reported AUROCs above 0.9; the winning entry's median bootstrapped
-PPV@90%recall was **0.035** [15]. That is not a bad model — it is what a good
-model looks like when you finally ask it the question the clinic asks. If you
-report only the AUROC, you have not told the reader the number they need.
+PPV@90%recall was **0.035** [15] — the dotted line above. That is not a bad model.
+It is what a good model looks like when you finally ask it the question the clinic
+asks.
 
 Two things to do:
 
@@ -428,6 +417,19 @@ decomposition is itself single-seed and we have not confirmed it across seeds.
 Retracting one claim does not entitle you to assert its replacement.)
 
 **4. Hundreds of duplicates that never existed** — the dHash false alarm from §3.
+
+**5. "Standard mitigations don't work."** The one I came closest to publishing. I
+had run Group-DRO [7]; it produced a model at chance on the actual task, and the
+tidy headline wrote itself. Then I checked the configuration, and the result was
+mine, not the method's: I had omitted the regularisation the paper's own title is
+about, sampled naturally, selected the checkpoint by a criterion a worst-group
+method cannot win under, and stopped before it converged — the mechanism never
+even engaged (the worst-group weight never concentrated). *Lesson: before you
+report that a method failed, prove you configured it right — that the mechanism
+activated, that it converged, and that you selected it by a criterion it can win
+under. **An indictment of your own config is not an indictment of the
+literature.*** It is why §2 reports only the mitigation I ran properly, and draws
+no conclusion about de-biasing in general.
 
 **Why put this in a tutorial?** Because *self-skepticism is the method, not a
 disclaimer at the end.* Every one of those four was killed by a discipline that is
