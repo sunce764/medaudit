@@ -32,6 +32,28 @@ def brute_ece_equal_width(probs, labels, n_bins):
     return e
 
 
+def brute_ece_equal_mass(probs, labels, n_bins):
+    """Independent reference for quantile-binned (adaptive) ECE.
+
+    This is the strategy the tutorial actually recommends, so it needs a
+    reference of its own — an equal-width reference does not cover it. Built
+    from the definition: quantile edges over the observed confidences, dedup'd
+    (ties collapse quantiles), ends pinned to [0, 1], right-closed bins.
+    """
+    conf = probs.max(1)
+    correct = (probs.argmax(1) == labels).astype(float)
+    N = len(conf)
+    edges = np.unique(np.quantile(conf, np.linspace(0.0, 1.0, n_bins + 1)))
+    edges[0], edges[-1] = 0.0, 1.0
+    e = 0.0
+    for b in range(len(edges) - 1):
+        lo, hi = edges[b], edges[b + 1]
+        m = (conf >= lo) & (conf <= hi) if b == 0 else (conf > lo) & (conf <= hi)
+        if m.any():
+            e += m.sum() / N * abs(correct[m].mean() - conf[m].mean())
+    return e
+
+
 def softmax_rows(x):
     x = x - x.max(1, keepdims=True)
     e = np.exp(x)
@@ -68,9 +90,19 @@ def test_ece():
             assert abs(a - b) < 1e-9, (a, b, nb)
     probs = np.array([[1.0, 0.0], [0.0, 1.0], [1.0, 0.0]]); labels = np.array([0, 1, 0])
     assert M.ece(probs, labels, n_bins=10) < 1e-12
-    e = M.ece(softmax_rows(rng.random((200, 3))), rng.integers(0, 3, 200), strategy="equal_mass")
-    assert 0.0 <= e <= 1.0
-    print("  ece               OK")
+
+    # equal_mass is the strategy the tutorial recommends — it gets a real
+    # brute-force reference, not just a sanity range check.
+    for _ in range(30):
+        n, C = int(rng.integers(20, 120)), int(rng.integers(2, 6))
+        probs = softmax_rows(rng.random((n, C)) * 4)
+        labels = rng.integers(0, C, n)
+        for nb in (5, 10, 15):
+            a = M.ece(probs, labels, n_bins=nb, strategy="equal_mass")
+            b = brute_ece_equal_mass(probs, labels, nb)
+            assert abs(a - b) < 1e-9, ("equal_mass", a, b, nb)
+    assert M.ece(probs, labels, strategy="equal_mass") >= 0.0
+    print("  ece               OK  (equal_width + equal_mass vs brute force)")
 
 
 def test_brier():

@@ -98,10 +98,53 @@ def test_class_collinear_is_ambiguous():
           f"{rep['overall']['auroc']:.3f}, within-class near chance)")
 
 
+# --------------------------------------------------------------------------- #
+# robustness of the verdict machinery itself
+# --------------------------------------------------------------------------- #
+def test_l2_grid_and_partition_repeats_reported():
+    """A grid of ridge penalties is selected by nested inner-CV, and the report
+    exposes the spread across fold partitions so a lucky split cannot hide."""
+    def cls(rng):  return int(rng.random() < 0.5)
+    def att(rng, c): return int(rng.random() < 0.5)
+    def feat(rng, c, a):
+        return np.array([4.0 * a, 4.0 * c]) + rng.normal(0, 1, 2)
+    F, A, Y, G = _make(200, cls, att, feat, seed=11)
+
+    r = probe.linear_probe_auroc(F, A, G)              # default: L2_GRID, N_REPEATS
+    assert r["n_repeats"] == probe.N_REPEATS, r["n_repeats"]
+    lo, hi = r["partition_spread"]
+    assert lo <= r["auroc"] <= hi, (lo, r["auroc"], hi)
+    assert all(l in probe.L2_GRID for l in r["l2_chosen"]), r["l2_chosen"]
+    # a single scalar l2 must still work (back-compatible)
+    r1 = probe.linear_probe_auroc(F, A, G, l2=1.0)
+    assert r1["auroc"] > 0.85, r1
+    print(f"  l2_grid_and_repeats     OK  (chose l2={r['l2_chosen']}, "
+          f"spread {lo:.3f}-{hi:.3f})")
+
+
+def test_mixed_verdict_requires_all_classes():
+    """Mode encoded in ONE class only must NOT be promoted to SHORTCUT ENCODED —
+    with several classes probed, one hit is what chance produces."""
+    def cls(rng):  return int(rng.random() < 0.5)
+    def att(rng, c): return int(rng.random() < 0.5)
+    def feat(rng, c, a):
+        # dim0 carries mode ONLY for the malignant class (c == 1)
+        return np.array([5.0 * a * c, 4.0 * c]) + rng.normal(0, 1, 2)
+    F, A, Y, G = _make(220, cls, att, feat, seed=12)
+
+    rep = probe.probe_report(F, A, Y, G, attr_name="mode",
+                             class_names=["benign", "malignant"], min_per_class=40)
+    assert rep["verdict"] == "MIXED", (rep["verdict"], rep["detail"])
+    assert "not others" in rep["detail"]
+    print("  mixed_not_promoted      OK  (1-of-2 classes -> MIXED, not ENCODED)")
+
+
 if __name__ == "__main__":
     print("running probe tests:")
     test_group_kfold_no_leakage()
     test_encoded_shortcut()
     test_not_encoded()
     test_class_collinear_is_ambiguous()
+    test_l2_grid_and_partition_repeats_reported()
+    test_mixed_verdict_requires_all_classes()
     print("ALL PASS")
