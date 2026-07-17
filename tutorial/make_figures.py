@@ -19,6 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from medaudit.audits import probe
+from medaudit.metrics import auroc
 import make_demo  # noqa: E402  — reuses the exact cohorts §2 reports
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -28,6 +29,7 @@ OUT = os.path.join(HERE, "assets")
 # does not (and, for reference lines, structure the eye should not dwell on).
 INK = "#1a1a1a"      # axes, text
 DATA = "#1f4e79"     # deep, low-chroma blue — the only saturated ink
+EXT = "#c8792b"      # a second, colour-blind-safe hue for the "external" series
 MUTED = "#9297a0"    # de-emphasised data (below the decision line)
 LINE = "#b9bcc2"     # chance / neutral reference
 RULE = "#6f7681"     # decision line — grey, dashed, present but quiet
@@ -160,8 +162,110 @@ def fig_probe():
     print("  wrote assets/probe.png")
 
 
+def _sigmoid(x):
+    return 1.0 / (1.0 + np.exp(-x))
+
+
+def _roc(scores, y):
+    """FPR, TPR sweep for a ROC curve (plotting only; the AUROC number comes
+    from medaudit.metrics so the figure and the toolkit agree)."""
+    order = np.argsort(-scores, kind="mergesort")
+    y = y[order]
+    tp = np.cumsum(y)
+    fp = np.cumsum(1 - y)
+    tpr = np.concatenate([[0], tp / max(tp[-1], 1)])
+    fpr = np.concatenate([[0], fp / max(fp[-1], 1)])
+    return fpr, tpr
+
+
+def _reliability(scores, y, n_bins=10):
+    """Classic reliability points: mean predicted prob vs observed frequency per
+    equal-width bin. (metrics.reliability_curve is top-class confidence, which is
+    not what this diagram wants for a binary positive-probability curve.)"""
+    edges = np.linspace(0, 1, n_bins + 1)
+    xs, ys = [], []
+    for lo, hi in zip(edges[:-1], edges[1:]):
+        m = (scores >= lo) & (scores < hi if hi < 1 else scores <= hi)
+        if m.sum() >= 15:                       # skip underpowered bins
+            xs.append(scores[m].mean())
+            ys.append(y[m].mean())
+    return np.array(xs), np.array(ys)
+
+
+def fig_calibration():
+    """§4: the same model read in two hospitals — discrimination transfers
+    (ROC curves nearly superimpose) but calibration does not (reliability curves
+    come apart). Illustrative synthetic cohort: no patient data, known ground
+    truth. The model score is unchanged across sites; the external site's lower
+    prevalence makes that same score over-confident."""
+    rng = np.random.default_rng(20260718)
+    n, a = 6000, 1.55
+    zi = rng.normal(0, 1, n)                     # internal
+    si = _sigmoid(a * zi)                        # calibrated model score
+    yi = rng.binomial(1, si)
+    ze = rng.normal(0, 1, n)                     # external
+    se = _sigmoid(a * ze)                        # SAME model score mapping
+    ye = rng.binomial(1, _sigmoid(a * ze - 1.1))  # true prob lower -> score over-confident
+
+    ai, ae = auroc(si, yi), auroc(se, ye)
+
+    fig, (axr, axc) = plt.subplots(1, 2, figsize=(6.6, 3.2))
+
+    # (a) ROC — nearly superimposed
+    axr.plot([0, 1], [0, 1], color=LINE, lw=0.9, zorder=0)
+    for s, y, c, ls, lab, av in ((si, yi, DATA, "-", "internal", ai),
+                                 (se, ye, EXT, "--", "external", ae)):
+        fpr, tpr = _roc(s, y)
+        axr.plot(fpr, tpr, ls, color=c, lw=1.7, label=f"{lab}  (AUROC {av:.2f})")
+    axr.text(-0.02, 1.06, "(a)", transform=axr.transAxes, fontsize=9.5,
+             fontweight="bold", va="bottom", color=INK)
+    axr.set_title("discrimination transfers", loc="left", x=0.08, pad=6,
+                  fontsize=8, color=INK)
+    axr.set_xlabel("false-positive rate")
+    axr.set_ylabel("true-positive rate")
+    axr.set_xlim(-0.02, 1.02); axr.set_ylim(-0.02, 1.02)
+    axr.legend(frameon=False, loc="lower right", handlelength=1.8)
+    _spare(axr)
+
+    # (b) reliability — comes apart
+    axc.plot([0, 1], [0, 1], color=LINE, lw=0.9, zorder=0)
+    for s, y, c, mk, lab in ((si, yi, DATA, "o", "internal"),
+                             (se, ye, EXT, "s", "external")):
+        xs, ys = _reliability(s, y)
+        axc.plot(xs, ys, mk + "-", color=c, lw=1.4, ms=4, mew=0, label=lab)
+    axc.text(-0.02, 1.06, "(b)", transform=axc.transAxes, fontsize=9.5,
+             fontweight="bold", va="bottom", color=INK)
+    axc.set_title("calibration does not", loc="left", x=0.08, pad=6,
+                  fontsize=8, color=INK)
+    axc.annotate("over-confident:\nscore > observed", (0.55, 0.20),
+                 fontsize=6.8, color=EXT, ha="left")
+    axc.set_xlabel("mean predicted probability")
+    axc.set_ylabel("observed frequency")
+    axc.set_xlim(-0.02, 1.02); axc.set_ylim(-0.02, 1.02)
+    axc.legend(frameon=False, loc="upper left", handlelength=1.6)
+    _spare(axc)
+
+    fig.tight_layout()
+    # Label the diagonal, parallel to it, floated into the empty upper triangle so
+    # it never sits on the internal curve (which hugs the diagonal). A data-slope-1
+    # line's SCREEN angle depends on the final axes aspect, so read it off the
+    # laid-out transform rather than hard-coding degrees (34 vs 41 is the gap that
+    # made an earlier version's text drift onto the curve).
+    fig.canvas.draw()
+    p0 = axc.transData.transform((0.0, 0.0))
+    p1 = axc.transData.transform((1.0, 1.0))
+    diag_deg = float(np.degrees(np.arctan2(p1[1] - p0[1], p1[0] - p0[0])))
+    axc.annotate("perfect calibration", (0.27, 0.40), rotation=diag_deg,
+                 rotation_mode="anchor", fontsize=6.8, color="#9a9a9a",
+                 ha="left", va="bottom")
+    fig.savefig(os.path.join(OUT, "calibration.png"))
+    plt.close(fig)
+    print(f"  wrote assets/calibration.png  (AUROC internal {ai:.3f}, external {ae:.3f})")
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     fig_prevalence()
     fig_probe()
+    fig_calibration()
     print("figures in", OUT)

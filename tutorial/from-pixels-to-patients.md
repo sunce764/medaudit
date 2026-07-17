@@ -48,13 +48,16 @@ the obvious test does not answer it. §6 is about what happened when I answered 
 too fast.
 
 An AUROC tells you the model separates the classes *on data drawn like your test
-split*. It does not tell you *what* it separates them by, whether your test split
-was independent of training, whether a "0.9" prediction is really 90% likely, or
-what the number means when the disease is rare.
+split*. It does not tell you:
 
-Those four unknowns are four audits. This tutorial walks through each one, with
-runnable code, and ends with the audit's most uncomfortable and most valuable
-output: **the findings that did not survive scrutiny.**
+- **what** it separates them by — the acquisition shortcut (§2);
+- whether the test split was independent of training — leakage (§3);
+- whether a "0.9" prediction is really 90% likely — calibration (§4);
+- what the number means when the disease is rare — prevalence (§5).
+
+Each unknown is an audit. This tutorial walks through each one, with runnable
+code, and ends with the audit's most uncomfortable and most valuable output:
+**the findings that did not survive scrutiny.**
 
 A high AUROC is where the work starts, not where it ends.
 
@@ -169,11 +172,13 @@ shortcut probe · attribute = 'mode'  (positive if CI lower bound > 0.60; point 
 
 ![Probe AUROC for the controlled pair](assets/probe.png)
 
-Look at the headlines: **0.84 and 0.91**. Both high. Both, on their own, look like
-a model that has learned the light source. One of them is a model that never saw
-mode at all. **The headline cannot tell them apart — the within-class points can.**
-In case A they fall to 0.55–0.57, below the decision line (grey: not evidence); in
-case B they stay up near 0.77.
+*Same headline height — 0.84 (a), 0.91 (b) — opposite verdict: only the
+within-class points separate a real shortcut (b) from class-collinearity (a).*
+
+Both headlines look like a model that has learned the light source. One of them is
+a model that never saw mode at all. **The headline cannot tell them apart — the
+within-class points can.** In case A they fall to 0.55–0.57, below the decision
+line (grey: not evidence); in case B they stay up near 0.77.
 
 Two details there do quiet work. **"300 groups, 900 rows"**: the group count is
 the sample size that matters — three images of one patient are not three
@@ -280,12 +285,18 @@ same threshold, a third of the sensitivity gone.
 
 Nothing about the model's ability to *order* patients broke. What broke was the
 mapping from scores to probabilities, so a threshold calibrated in one hospital
-sat in the wrong place in the other. **The ROC curves nearly superimpose while the
-reliability curves come apart.** Plot only the ROC and this failure is invisible —
-it lives entirely in the axis AUROC discards [9]. A model can rank perfectly and
-still be systematically over-confident, as modern networks generally are [4]:
-at the bedside, that is the difference between a probability a clinician can act
-on and a number that merely sorts.
+sat in the wrong place in the other. Plot only the ROC and this failure is
+invisible — it lives entirely in the axis AUROC discards [9].
+
+![Internal vs external ROC and reliability, illustrative synthetic cohort](assets/calibration.png)
+
+*Illustrative synthetic cohort with known ground truth. **The ROC curves nearly
+superimpose (a) while the reliability curves come apart (b)** — the same model,
+read in two sites at the same base rate, ranks alike but is over-confident in one.*
+
+A model can rank perfectly and still be systematically over-confident, as modern
+networks generally are [4]: at the bedside, that is the difference between a
+probability a clinician can act on and a number that merely sorts.
 
 `medaudit` uses hand-written, unit-tested calibration metrics (no `sklearn`, so
 every number is auditable against its definition):
