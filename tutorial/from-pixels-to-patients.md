@@ -510,19 +510,19 @@ you fork this to audit your own model, keep it that way: the code is what ships.
 
 ## AI assistance
 
-The rules ask which tools were used and how, so: an AI coding assistant (Claude,
-via Claude Code) was used throughout this work. It assisted the underlying
-cystoscopy audit — experiment code, analysis, and adversarial review of my own
-conclusions. It drafted this tutorial's prose. It implemented the accompanying
-`medaudit` toolkit, generalising my research code to a dataset-agnostic tool. It
-checked the citations, and it ran an adversarial review of this draft that caught
-errors on both sides — including a claim in §2 that my own records had already
-marked unclaimable, and that I had let through.
+The rules ask which tools were used and how. An AI coding assistant (Claude Opus
+4.8, via Claude Code) was used for this work:
 
-What is mine: the choice of problem, the direction of the work, the judgments
-about what could and could not be claimed, and — the part I would defend hardest
-— the decision to retract the four findings in §6 rather than publish the
-flattering versions of them. I take responsibility for everything asserted here.
+- it assisted the underlying cystoscopy audit — experiment code, analysis, and
+  adversarial review of my conclusions;
+- it drafted this tutorial's prose;
+- it implemented the accompanying `medaudit` toolkit, generalising my research
+  code into a dataset-agnostic tool;
+- it checked the citations;
+- it ran an adversarial review of this draft, which caught errors on both sides —
+  including a claim in §2 that my own records had already marked unclaimable.
+
+I am responsible for everything asserted here.
 
 ---
 
