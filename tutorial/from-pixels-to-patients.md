@@ -6,6 +6,11 @@
 (Biomedical Engineering, Guangdong Medical University). Accompanying code:
 the `medaudit` toolkit (open-source, MIT).
 
+[Project home](../README.md) · [Run and interpret the examples](RUNNING.md)
+
+Reader-facing revision: the [earlier repository version](https://github.com/sunce764/medaudit/blob/71c6889f7b2aa34b247af9cffddcd4f2f12e4854/tutorial/from-pixels-to-patients.md)
+is preserved in Git. This revision is not a claim about the exact PDF held by OpenReview.
+
 > **Audience & goal.** For Masters/PhD readers who can train a classifier but
 > have not yet had one fail *silently*. By the end you will be able to run the
 > **shortcut** and **leakage** audits on your own model from one command, and
@@ -65,7 +70,7 @@ A high AUROC is where the work starts, not where it ends.
 
 ## 1. Set-up: the manifest and one command
 
-`medaudit` audits a *frozen* model — you do not retrain anything. You give it a
+`medaudit` keeps the original model *frozen*; it fits separate attribute probes. You give it a
 **manifest**: a CSV with one row per image.
 
 ```
@@ -280,6 +285,9 @@ matches your domain's homogeneity, and always eyeball what it flags.*
 
 ## 4. Audit III — calibration ★
 
+For a self-contained synthetic input and expected output, run
+`python tutorial/worked_examples.py`; see the [metric conventions](RUNNING.md#calibration-and-prevalence-worked-examples).
+
 **This mattered most in the real audit, and it is the section you are most likely
 to skip.**
 
@@ -460,14 +468,17 @@ transferable skill.
 
 ## 7. Run it yourself
 
-Everything below is the sequence re-run from a clean clone before submitting.
+Use the [current Quickstart](../README.md#quickstart) for an isolated environment
+and the [reading guide](RUNNING.md) for expected outputs. The historical submission
+version is linked above; this reader revision does not reproduce the underlying research.
 
 ```bash
 git clone https://github.com/sunce764/medaudit && cd medaudit
 pip install -e .                                    # numpy only — no torch, no sklearn
 python tutorial/make_demo.py                        # builds the cohort, prints the reports
-medaudit audit --config tutorial/demo/audit.json    # the same audit via the CLI
-medaudit audit --config tutorial/demo/leaked.json   # a planted leak, so you see it fire
+medaudit audit --config tutorial/demo/audit.json --out tutorial/demo/report.txt
+medaudit audit --config tutorial/demo/leaked.json --out tutorial/demo/leaked-report.txt
+python tutorial/worked_examples.py                  # calibration / prevalence arithmetic
 ```
 
 **Be clear what the report is: two audits, not four.** `medaudit audit` runs the
@@ -528,8 +539,7 @@ you fork this to audit your own model, keep it that way: the code is what ships.
 
 ## AI assistance
 
-The rules ask which tools were used and how. An AI coding assistant (Claude Opus
-4.8, via Claude Code) was used for this work:
+Claude Code assisted with the original audit, tutorial and toolkit:
 
 - it assisted the underlying cystoscopy audit — experiment code, analysis, and
   adversarial review of my conclusions;
@@ -540,7 +550,11 @@ The rules ask which tools were used and how. An AI coding assistant (Claude Opus
 - it ran an adversarial review of this draft, which caught errors on both sides —
   including a claim in §2 that my own records had already marked unclaimable.
 
-I am responsible for everything asserted here.
+The author is responsible for the content and conclusions.
+
+For this September 2026 reader-facing revision, OpenAI Codex assisted with README
+organization, runnable example scaffolding, documentation corrections, citation
+metadata checks, and local installation/example/test verification.
 
 ---
 
@@ -561,7 +575,7 @@ pages 151–159, 2020. doi:10.1145/3368555.3384468
 
 [4] C. Guo, G. Pleiss, Y. Sun, and K. Q. Weinberger. On calibration of modern
 neural networks. In *Proceedings of the 34th International Conference on Machine
-Learning (ICML)*, PMLR 70:1321–1330, 2017.
+Learning (ICML)*, PMLR 70:1321–1330, 2017. [Publisher](https://proceedings.mlr.press/v70/guo17a.html).
 
 [5] G. W. Brier. Verification of forecasts expressed in terms of probability.
 *Monthly Weather Review*, 78(1):1–3, 1950.
@@ -593,7 +607,7 @@ calibration in deep learning. In *CVPR Workshops*, pages 38–41, 2019.
 [12] R. Roelofs, N. Cain, J. Shlens, and M. C. Mozer. Mitigating bias in
 calibration error estimation. In *Proceedings of the 25th International
 Conference on Artificial Intelligence and Statistics (AISTATS)*, PMLR
-151:4036–4054, 2022.
+151:4036–4054, 2022. [Publisher](https://proceedings.mlr.press/v151/roelofs22a.html).
 
 [13] C. A. Field and A. H. Welsh. Bootstrapping clustered data. *Journal of the
 Royal Statistical Society: Series B*, 69(3):369–390, 2007.
@@ -603,9 +617,9 @@ doi:10.1111/j.1467-9868.2007.00593.x
 Cambridge University Press, 1997. ISBN 0-521-57471-4
 
 [15] T. J. M. Jaspers, F. Caetano, C. H. B. Claessens, C. H. J. Kusters, R. A. H.
-van Heslinga, F. Slooter, J. J. Bergman, P. H. N. De With, M. R. Jong, A. J. de
-Groof, and F. van der Sommen. Development and evaluation of CADe systems in a
-low-prevalence setting: the RARE25 challenge for early Barrett's neoplasia
-detection. arXiv:2604.11171. doi:10.48550/arXiv.2604.11171
+van Eijck van Heslinga, F. Slooter, J. J. Bergman, P. H. N. De With, M. R. Jong, A. J. de
+Groof, and F. van der Sommen. Development and evaluation of CADe systems in
+low-prevalence setting: The RARE25 challenge for early detection of Barrett's
+neoplasia. [arXiv:2604.11171v1](https://arxiv.org/abs/2604.11171v1), 2026. doi:10.48550/arXiv.2604.11171
 
 ---

@@ -1,8 +1,8 @@
-"""Reproduce every number shown in `from-pixels-to-patients.md`.
+"""Reproduce the synthetic probe blocks and audit reports in the tutorial.
 
     pip install -e . && python tutorial/make_demo.py
 
-Builds a synthetic cohort (no patient data — none of it is redistributable) whose
+Builds a synthetic cohort (no patient data required) whose
 structure mirrors the real audit in miniature, then prints the outputs the
 tutorial walks through.
 
@@ -22,7 +22,7 @@ this demo changed the collinearity between A and B as well, which made the
 comparison meaningless.)
 
 Both cases produce a high, alarming-looking headline (~0.84 vs ~0.91). Only one
-is a real shortcut. Separating them is the within-class probe's entire job.
+explicitly encodes mode beyond class-collinearity. Neither proves classifier reliance. Separating them is the within-class probe's entire job.
 
 Writes the manifest/features/config to tutorial/demo/ so you can also run the CLI:
 
@@ -74,8 +74,8 @@ def case_a_class_collinear():
 
 
 def case_b_encoded():
-    """beta = 1.2: identical setup, but the features also encode mode — a real
-    shortcut, and one that survives holding the class fixed."""
+    """beta = 1.2: identical setup, but the features also encode mode — a potential
+    shortcut that remains decodable when holding the class fixed."""
     f, a, y, g = _cohort(beta=1.2, seed=3)
     return probe.probe_report(f, a, y, g, attr_name="mode",
                               class_names=CLASSES, min_per_class=40)
